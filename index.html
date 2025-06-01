@@ -1,27 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <!-- Allow pinch‐zoom on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kaspa‐Style BlockDAG (Responsive + Auto‐Scroll)</title>
+  <title>Kaspa‐Style BlockDAG (Responsive Title)</title>
   <style>
-    html, body {
+    html,
+    body {
       margin: 0;
       padding: 0;
       background: #111;
       font-family: sans-serif;
       color: #fff;
-      /* Let vertical scroll if content is tall; no horizontal scroll */
       overflow-x: hidden;
       overflow-y: auto;
     }
 
-    /* Make the SVG fill the entire viewport and scale via viewBox */
     svg {
       display: block;
       width: 100%;
       height: 100%;
+    }
+
+    /* ───── Responsive Title ────────────────────────────────────────────────── */
+    .title-text {
+      font-family: sans-serif;
+      font-weight: bold;
+      fill: #ff0000;
+      opacity: 0.5;
+      pointer-events: none;
+
+      /* clamp(min, ideal, max) → min=16px, ideal=8vw, max=40px */
+      font-size: clamp(16px, 8vw, 40px);
     }
 
     .link {
@@ -37,13 +48,11 @@
       opacity: 0;
       transition: opacity 0.2s;
     }
+
     .show-text .block-label-text {
       opacity: 1;
     }
 
-    /*──────────────────────────────────────────────────────────────────────────
-      HUD: pinned to the very BOTTOM, spanning 100% width
-    ──────────────────────────────────────────────────────────────────────────*/
     #hud {
       position: fixed;
       bottom: 0;
@@ -58,15 +67,16 @@
       align-items: center;
       gap: 12px;
       z-index: 100;
-      border-radius: 0; /* square corners */
+      border-radius: 0;
     }
 
-    #hud > div,
-    #hud > span {
+    #hud>div,
+    #hud>span {
       display: flex;
       align-items: center;
       gap: 6px;
     }
+
     #hud label,
     #hud input,
     #hud button,
@@ -74,12 +84,15 @@
       margin: 0;
       vertical-align: middle;
     }
+
     #hud input[type="number"] {
       width: 48px;
     }
+
     #hud input[type="checkbox"] {
       margin-left: 4px;
     }
+
     #resetBtn {
       padding: 6px 10px;
       background-color: #555;
@@ -89,26 +102,29 @@
       cursor: pointer;
       font-size: 12px;
     }
+
     #resetBtn:hover {
       background-color: #666;
     }
+
     #hud button {
       padding: 4px 8px;
       font-size: 12px;
     }
 
-    /* On very narrow screens, shrink the HUD slightly but keep it at bottom */
     @media (max-width: 480px) {
       #hud {
         padding: 6px 8px;
         font-size: 11px;
         gap: 8px;
       }
+
       #hud input[type="number"] {
         width: 40px;
       }
-      #hud > div,
-      #hud > span {
+
+      #hud>div,
+      #hud>span {
         gap: 4px;
       }
     }
@@ -182,7 +198,7 @@
       const MIN_SPREAD_RATIO = 0.25;
       const MAX_SPREAD_RATIO = 1.0;
       let normalizedMCP = (MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT) /
-                         (REFERENCE_UPPER_MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT);
+        (REFERENCE_UPPER_MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT);
       normalizedMCP = Math.max(0, Math.min(1, normalizedMCP));
       const DYNAMIC_VERTICAL_SPREAD_RATIO = MIN_SPREAD_RATIO +
         normalizedMCP * (MAX_SPREAD_RATIO - MIN_SPREAD_RATIO);
@@ -364,8 +380,8 @@
                     const overlapY = (CHECK_H - Math.abs(dy)) / dist;
                     node.x += dx * COLLISION_STEP * overlapX;
                     node.y += dy * COLLISION_STEP * overlapY;
-                    other.x  -= dx * COLLISION_STEP * overlapX;
-                    other.y  -= dy * COLLISION_STEP * overlapY;
+                    other.x -= dx * COLLISION_STEP * overlapX;
+                    other.y -= dy * COLLISION_STEP * overlapY;
                     node.x = clamp(node.x, xMin, xMax);
                     node.y = clamp(node.y, yMin, yMax);
                     other.x = clamp(other.x, xMin, xMax);
@@ -467,7 +483,7 @@
             .append("g")
             .attr("class", "node-group")
             // Start at vertical center, then animate down to d.y
-            .attr("transform", d => `translate(${d.x}, ${H/2})`)
+            .attr("transform", d => `translate(${d.x}, ${H / 2})`)
             .style("opacity", 0);
 
           enterSel.append("rect")
@@ -503,13 +519,13 @@
             .style("opacity", 0);
 
           linkEnter.attr("d", d => {
-            return linkPath(d.source.x, H/2, d.target.x, d.target.y);
+            return linkPath(d.source.x, H / 2, d.target.x, d.target.y);
           });
           linkEnter.transition()
             .delay(calculatedDelay)
             .duration(300)
             .style("opacity", connectionsVisible ? 1 : 0)
-            .attrTween("d", function(dLink) {
+            .attrTween("d", function (dLink) {
               const currentPath = d3.select(this).attr("d");
               const finalPath = computeLinkPath(dLink);
               return d3.interpolateString(currentPath, finalPath);
@@ -540,8 +556,8 @@
           existingNodesInBackfillCol.forEach((n, i) => {
             n.x = n.columnX + randomJitter(MAX_X_JITTER);
             n.y = clamp(YsBackfill[i] + randomJitter(MAX_Y_JITTER),
-                        10 + halfBlockH,
-                        H - 10 - halfBlockH);
+              10 + halfBlockH,
+              H - 10 - halfBlockH);
           });
 
           const newYsForBackfillBatch = YsBackfill.slice(existingNodesInBackfillCol.length);
@@ -558,7 +574,7 @@
               (movedNodeIds.has(dLink.target.id) && dLink.target.columnX === backfillTargetX)
             )
             .transition().duration(600)
-            .attrTween("d", function(dLink) {
+            .attrTween("d", function (dLink) {
               const prevPath = d3.select(this).attr("d");
               const finalPath = computeLinkPath(dLink);
               return d3.interpolateString(prevPath, finalPath);
@@ -645,8 +661,8 @@
       //  • Mouse‐wheel zoom (desktop) works
       //  • Two‐finger pinch (mobile) works
       svg.call(zoomBehavior)
-         // (Optional) disable double-click-to-zoom
-         .on("dblclick.zoom", null);
+        // (Optional) disable double-click-to-zoom
+        .on("dblclick.zoom", null);
 
       // ─── 8) Auto‐pan / Render Loop ─────────────────────────────────────────────
       d3.timer(() => {
@@ -661,9 +677,9 @@
         // ALWAYS re‐draw <g> using our own scrollX + currentZoom
         g.attr(
           "transform",
-          `translate(${W/2}, ${H/2})
+          `translate(${W / 2}, ${H / 2})
            scale(${currentZoom})
-           translate(${-scrollX}, ${-H/2})`
+           translate(${-scrollX}, ${-H / 2})`
         );
 
         pruneOffscreen();
@@ -791,4 +807,5 @@
     })();
   </script>
 </body>
+
 </html>
