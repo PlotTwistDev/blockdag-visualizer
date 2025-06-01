@@ -641,21 +641,24 @@
       const zoomBehavior = d3.zoom()
         .scaleExtent([0.5, 10])
         .on("zoom", (event) => {
-          // (i) Extract the new scale from event.transform.k
+          // (i) Grab the new scale k:
           currentZoom = event.transform.k;
 
-          // (ii) Immediately reset any translation in D3’s internal state back to zero.
-          //      That way, we only let D3 control the scale, not the x/y pan.
-          svg.call(
+          // (ii) Immediately reset any translation in D3’s internal state to zero:
+          //      That way, only the scale changes, not our auto-pan:
+          d3.select("#zoomCapture").call(
             zoomBehavior.transform,
             d3.zoomIdentity.scale(currentZoom)
           );
 
-          // (iii) Update the zoom level display in the HUD
+          // (iii) Update the HUD’s zoom‐level display:
           document.getElementById("zoomLevelDisplay").textContent = `${currentZoom.toFixed(2)}x`;
-
-          // We do NOT set userTransform; we want auto-pan to continue driving scrollX
         });
+
+      // 2) Instead of svg.call(...), attach zoomBehavior to the transparent rect:
+      d3.select("#zoomCapture")
+        .call(zoomBehavior)
+        .on("dblclick.zoom", null); // (optional) disable double‐click zoom
 
       // Attach the zoomBehavior to the SVG so that:
       //  • Mouse‐wheel zoom (desktop) works
@@ -731,12 +734,15 @@
 
       // “+” / “−” zoom buttons now drive D3’s zoomBehavior so it only changes the scale:
       zoomInBtn.addEventListener("click", () => {
-        svg.transition()
+        // Call scaleBy on the same element that we attached the zoom to:
+        d3.select("#zoomCapture")
+          .transition()
           .duration(300)
           .call(zoomBehavior.scaleBy, 1.2);
       });
       zoomOutBtn.addEventListener("click", () => {
-        svg.transition()
+        d3.select("#zoomCapture")
+          .transition()
           .duration(300)
           .call(zoomBehavior.scaleBy, 1 / 1.2);
       });
