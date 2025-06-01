@@ -20,7 +20,7 @@
       display: block;
       width: 100vw;
       height: 100vh;
-      /* Ensure we can capture wheel events */
+      /* Ensure we can capture wheel events on touch devices */
       touch-action: none;
     }
 
@@ -42,7 +42,7 @@
       opacity: 1;
     }
 
-    /* HUD styling */
+    /* HUD Styling */
     #hud {
       position: fixed;
       bottom: 20px;
@@ -135,80 +135,85 @@
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script>
     (function () {
-      // ————————————————
-      // CONSTANTS & STATE
-      // ————————————————
+      // --- Constants and State ---
       const svg = d3.select("svg");
-      let W = window.innerWidth,
-        H = window.innerHeight;
+      let W = window.innerWidth;
+      let H = window.innerHeight;
       let halfH = H / 2;
 
-      const VERTICAL_MARGIN = 10;
-      const BUFFER_OFF_SCREEN_REMOVAL = W;
-      const HORIZONTAL_SPACING = 100;
+      // Visual layout parameters
+      const VERTICAL_MARGIN = 10; // Margin from top/bottom of the screen for block placement
+      const BUFFER_OFF_SCREEN_REMOVAL = W; // How far off-screen blocks must be before pruning
+      const HORIZONTAL_SPACING = 100; // Horizontal distance between columns of blocks
 
-      let nextX = W / 2;
-      let latestBaseX = W / 2;
+      // Simulation progression
+      let nextX = W / 2; // X-coordinate for the next column of blocks
+      let latestBaseX = W / 2; // Tracks the rightmost x-coordinate used by any block
 
-      const DEFAULT_TARGET_BPS = 10;
-      let TARGET_AVG_BPS = DEFAULT_TARGET_BPS;
-      const BURST_FLUCT_PERCENT = 0.3;
-      const MIN_INTERVAL_MS = 100,
-        MAX_INTERVAL_MS = 5000;
+      // Block generation parameters
+      const DEFAULT_TARGET_BPS = 10; // Default target Blocks Per Second
+      let TARGET_AVG_BPS = DEFAULT_TARGET_BPS; // Current target average BPS
+      const BURST_FLUCT_PERCENT = 0.3; // Fluctuation percentage for block generation intervals
+      const MIN_INTERVAL_MS = 100; // Minimum interval between block generation bursts
+      const MAX_INTERVAL_MS = 5000; // Maximum interval
 
-      const MIN_COLUMN_PERCENT = 0.01,
-        MAX_COLUMN_PERCENT = 0.80;
+      // Column generation parameters (how many blocks per "burst")
+      const MIN_COLUMN_PERCENT = 0.01; // Min percentage of BPS to form a column
+      const MAX_COLUMN_PERCENT = 0.80; // Max percentage of BPS to form a column
 
-      const REFERENCE_UPPER_MAX_COLUMN_PERCENT = 0.80;
-      const REFERENCE_LOWER_MAX_COLUMN_PERCENT = 0.10;
-      const MIN_SPREAD_RATIO = 0.25;
-      const MAX_SPREAD_RATIO = 1.0;
+      // Parameters for dynamic vertical spread of blocks in a column
+      const REFERENCE_UPPER_MAX_COLUMN_PERCENT = 0.80; // Reference for max column size in spread calculation
+      const REFERENCE_LOWER_MAX_COLUMN_PERCENT = 0.10; // Reference for min column size
+      const MIN_SPREAD_RATIO = 0.25; // Minimum vertical spread of blocks in a column
+      const MAX_SPREAD_RATIO = 1.0; // Maximum vertical spread
 
-      // Compute a vertical spread ratio based on MAX_COLUMN_PERCENT:
+      // Calculate a dynamic vertical spread ratio based on MAX_COLUMN_PERCENT.
+      // This allows columns with more blocks to spread out more vertically.
       let normalizedMCP = (MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT) /
         (REFERENCE_UPPER_MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT);
-      normalizedMCP = clamp(normalizedMCP, 0, 1);
+      normalizedMCP = clamp(normalizedMCP, 0, 1); // Ensure it's within [0, 1]
       const DYNAMIC_VERTICAL_SPREAD_RATIO = MIN_SPREAD_RATIO +
         normalizedMCP * (MAX_SPREAD_RATIO - MIN_SPREAD_RATIO);
 
-      const BLOCK_W = 8,
-        BLOCK_H = 8;
-      const halfBlockW = BLOCK_W / 2,
-        halfBlockH = BLOCK_H / 2;
-      const MIN_SEP = 3;
+      // Block visual and collision parameters
+      const BLOCK_W = 8, BLOCK_H = 8; // Dimensions of a single block
+      const halfBlockW = BLOCK_W / 2, halfBlockH = BLOCK_H / 2;
+      const MIN_SEP = 3; // Minimum separation between blocks for collision detection
 
-      const PREFERRED_MAX_BLOCK_CENTER_SPACING_Y = BLOCK_H * 4.0;
+      // Vertical distribution parameters
+      const PREFERRED_MAX_BLOCK_CENTER_SPACING_Y = BLOCK_H * 4.0; // Preferred max y-spacing between block centers
 
-      const RECENT_POOL = 12;
+      // DAG structure parameters
+      const RECENT_POOL = 12; // Number of recent blocks to consider for parent selection
 
-      const MAX_X_JITTER = 48,
-        MAX_Y_JITTER = 36;
-      const COLLISION_ITERS = 50,
-        COLLISION_STEP = 0.5;
-      const CHECK_W = BLOCK_W + MIN_SEP,
-        CHECK_H = BLOCK_H + MIN_SEP;
+      // Positional jitter and collision resolution
+      const MAX_X_JITTER = 48; // Max random horizontal offset for blocks within a column
+      const MAX_Y_JITTER = 36; // Max random vertical offset for blocks
+      const COLLISION_ITERS = 50; // Max iterations for collision resolution
+      const COLLISION_STEP = 0.5; // Step size for moving colliding blocks
+      const CHECK_W = BLOCK_W + MIN_SEP; // Width for collision check bounding box
+      const CHECK_H = BLOCK_H + MIN_SEP; // Height for collision check bounding box
 
-      const MAX_BURST_JITTER = 200;
+      const MAX_BURST_JITTER = 200; // Max random delay (ms) for animating block appearance in a burst
 
-      let nodes = [];
-      let links = [];
-      let nodeCounter = 0;
-      const columnMap = new Map();
+      // Core data structures
+      let nodes = []; // Array of all block nodes
+      let links = []; // Array of all links between nodes
+      let nodeCounter = 0; // Counter for generating unique node IDs
+      const columnMap = new Map(); // Maps x-coordinate to an array of nodes in that column
 
-      let isPaused = false;
-      let currentZoom = 1.0;
-      const ZOOM_FACTOR = 1.2;
+      // Simulation control
+      let isPaused = false; // Flag to pause block generation
+      let currentZoom = 1.0; // Current zoom level
+      const ZOOM_FACTOR = 1.2; // Multiplier for zoom in/out
 
-      // ————————————————
-      // Kaspa TIP SET logic
-      // ————————————————
-      // Keep a list of “current tips.” Each new block will link to all existing tips,
-      // then replace them as the new sole tip.
-      let tipSet = [];
+      // --- Kaspa-inspired Tip Set Logic ---
+      // The tip set represents the "frontier" of the DAG.
+      // New blocks link to selected tips and recent blocks.
+      let tipSet = []; // Array of current tip nodes in the DAG
+      const MAX_TIPS = 5; // Maximum number of tips to maintain in the tip set
 
-      // ————————————————
-      // HUD Elements
-      // ————————————————
+      // --- HUD Elements ---
       const targetInput = document.getElementById("targetBPSInput");
       const realtimeBPS = document.getElementById("realtimeBPSDisplay");
       const zoomInBtn = document.getElementById("zoomInBtn");
@@ -217,72 +222,100 @@
       const resetBtn = document.getElementById("resetBtn");
       const showTextToggle = document.getElementById("showTextToggle");
       const showConnectionsToggle = document.getElementById("showConnectionsToggle");
-      let showText = true;
-      let connectionsVisible = true;
+      let showText = true; // State for showing block ID text
+      let connectionsVisible = true; // State for showing connection lines
 
-      // ————————————————
-      // HELPERS
-      // ————————————————
+      // --- Helper Functions ---
       function clamp(v, min, max) { return v < min ? min : (v > max ? max : v); }
       function randBetween(min, max) { return Math.random() * (max - min) + min; }
       function randomJitter(amount) { return randBetween(-amount, amount); }
 
+      /**
+       * Generates an SVG path string for a quadratic Bézier curve between two points,
+       * with the curve arching upwards.
+       * @param {number} sx - Source x-coordinate.
+       * @param {number} sy - Source y-coordinate.
+       * @param {number} tx - Target x-coordinate.
+       * @param {number} ty - Target y-coordinate.
+       * @returns {string} SVG path data string.
+       */
       function linkPath(sx, sy, tx, ty) {
-        const mx = (sx + tx) / 2;
+        const mx = (sx + tx) / 2; // Midpoint x for control point
+        // Control point y, creating an upward curve
         const curveH = Math.max(20, Math.abs(sy - ty) * 0.2 + 20);
         const my = Math.min(sy, ty) - curveH;
         return `M${sx},${sy} Q${mx},${my} ${tx},${ty}`;
       }
+
+      /**
+       * Computes the link path for a D3 link object.
+       * @param {object} d - Link object with source and target node properties.
+       * @returns {string} SVG path data string.
+       */
       function computeLinkPath(d) {
         return linkPath(d.source.x, d.source.y, d.target.x, d.target.y);
       }
 
+      /**
+       * Retrieves a list of the most recently added nodes.
+       * @returns {Array<object>} An array of recent node objects.
+       */
       function getRecentNodes() {
         return nodes.slice(-RECENT_POOL);
       }
 
-      // ————————————————
-      // OVERRIDDEN attachParents: link to every tip in tipSet, then reset tipSet
-      // ————————————————
+      /**
+       * Connects a new node to selected parent nodes and updates the tip set.
+       * Parents are chosen from a combination of recent nodes and the current tip set.
+       * The new node is then added to the tip set.
+       * @param {object} node - The new node to attach parents to.
+       */
       function attachParents(node) {
-        // If no tips exist yet, this is the “genesis” block:
+        // If no tips exist (e.g., genesis block), this node becomes the first tip.
         if (tipSet.length === 0) {
           tipSet.push(node);
           return;
         }
 
-        // (A) Build a candidate list of “recent” + “current tips”:
-        const recentWindow = nodes.slice(-10);
-        const uniqueRecent = Array.from(new Set(recentWindow.concat(tipSet)));
+        // Build a candidate pool of potential parents from recent nodes and current tips.
+        const recentWindow = nodes.slice(-10); // Consider a window of recent nodes
+        const uniqueRecentAndTips = Array.from(new Set(recentWindow.concat(tipSet)));
 
-        // Decide how many parents to pick (1 to up to 3)
-        const maxParents = Math.min(uniqueRecent.length, 3);
-        const numParents = Math.floor(randBetween(1, maxParents));
+        // Determine the number of parents to select (1 to 3, or fewer if not enough candidates).
+        const maxParents = Math.min(uniqueRecentAndTips.length, 3);
+        const numParents = Math.max(1, Math.floor(randBetween(1, maxParents + 1))); // Ensure at least 1 parent if possible
 
-        // Shuffle and pick those parents
-        const chosenParents = d3.shuffle(uniqueRecent).slice(0, numParents);
+        // Shuffle candidates and select parents.
+        const chosenParents = d3.shuffle(uniqueRecentAndTips.slice()).slice(0, numParents);
+
         chosenParents.forEach(parentNode => {
           links.push({ source: node, target: parentNode });
         });
 
-        // (B) Update the tipSet so blocks can have multiple children
+        // Add the new node to the tip set.
         tipSet.push(node);
-        const MAX_TIPS = 5;
+        // Prune the tip set if it exceeds the maximum size.
         if (tipSet.length > MAX_TIPS) {
-          tipSet.shift();
+          tipSet.shift(); // Remove the oldest tip
         }
       }
 
-      // Compute vertical positions for k blocks in one column
+      /**
+       * Computes evenly distributed vertical positions for k blocks within a column.
+       * @param {number} k - The number of blocks in the column.
+       * @returns {Array<number>} An array of y-coordinates.
+       */
       function computeEvenYs(k) {
         if (k === 0) return [];
         const screenCenterY = H / 2;
         if (k === 1) return [screenCenterY];
 
+        // Calculate the available vertical span, considering margins.
         const fullSpan = Math.max(0, H - 2 * VERTICAL_MARGIN - BLOCK_H);
         const allowedSpan = fullSpan * DYNAMIC_VERTICAL_SPREAD_RATIO;
-        const spacingIfFull = allowedSpan / (k - 1);
 
+        // Determine spacing, ensuring it's not too large or too small.
+        const spacingIfFull = (k > 1) ? allowedSpan / (k - 1) : allowedSpan;
         let centerSpacing = Math.min(spacingIfFull, PREFERRED_MAX_BLOCK_CENTER_SPACING_Y);
         const minCenter = BLOCK_H + MIN_SEP;
         centerSpacing = Math.max(centerSpacing, minCenter);
@@ -293,31 +326,51 @@
         return Array.from({ length: k }, (_, i) => firstY + i * centerSpacing);
       }
 
+      /**
+       * Adjusts node positions within a column to prevent overlaps.
+       * Uses a quadtree for efficient neighbor finding and iteratively
+       * nudges colliding nodes apart.
+       * @param {Array<object>} nodesInCol - Array of node objects in the current column.
+       * @param {number} centerX - The central x-coordinate of the column, used for jitter bounds.
+       */
       function resolveCollisions(nodesInCol, centerX) {
         if (nodesInCol.length < 2) return;
+
+        // Define boundaries for node movement during collision resolution.
         const xMin = centerX - MAX_X_JITTER, xMax = centerX + MAX_X_JITTER;
         const yMin = VERTICAL_MARGIN + halfBlockH, yMax = H - VERTICAL_MARGIN - halfBlockH;
-        let iter = 0;
-        while (iter < COLLISION_ITERS) {
-          let anyColl = false;
+
+        for (let iter = 0; iter < COLLISION_ITERS; iter++) {
+          let anyCollision = false;
           const qt = d3.quadtree().x(d => d.x).y(d => d.y).addAll(nodesInCol);
+
           nodesInCol.forEach(node => {
-            const x0 = node.x - CHECK_W, y0 = node.y - CHECK_H;
+            const x0 = node.x - CHECK_W, y0 = node.y - CHECK_H; // Bounding box for collision check
             const x1 = node.x + CHECK_W, y1 = node.y + CHECK_H;
+
             qt.visit((quad, x2, y2, x3, y3) => {
+              // Quadtree traversal: if quad doesn't overlap, skip
               if (x2 > x1 || y2 > y1 || x3 < x0 || y3 < y0) return true;
-              if (!quad.length) {
+
+              if (!quad.length) { // Leaf node
                 let other = quad.data;
-                if (other !== node) {
-                  const dx = node.x - other.x, dy = node.y - other.y;
+                if (other !== node) { // Don't check against self
+                  const dx = node.x - other.x;
+                  const dy = node.y - other.y;
+                  // Check for actual collision
                   if (Math.abs(dx) < CHECK_W && Math.abs(dy) < CHECK_H) {
-                    anyColl = true;
-                    let dist = Math.hypot(dx, dy) || 1e-3;
-                    const nx = dx / dist, ny = dy / dist;
-                    node.x += nx * COLLISION_STEP;
-                    node.y += ny * COLLISION_STEP;
-                    other.x -= nx * COLLISION_STEP;
-                    other.y -= ny * COLLISION_STEP;
+                    anyCollision = true;
+                    const dist = Math.hypot(dx, dy) || 1e-3; // Avoid division by zero
+                    const overlapX = (CHECK_W - Math.abs(dx)) / dist;
+                    const overlapY = (CHECK_H - Math.abs(dy)) / dist;
+
+                    // Move nodes apart based on overlap and collision step
+                    node.x += dx * COLLISION_STEP * overlapX;
+                    node.y += dy * COLLISION_STEP * overlapY;
+                    other.x -= dx * COLLISION_STEP * overlapX;
+                    other.y -= dy * COLLISION_STEP * overlapY;
+
+                    // Clamp positions to defined boundaries
                     node.x = clamp(node.x, xMin, xMax);
                     node.y = clamp(node.y, yMin, yMax);
                     other.x = clamp(other.x, xMin, xMax);
@@ -325,40 +378,48 @@
                   }
                 }
               }
-              return false;
+              return false; // Continue traversal
             });
           });
-          if (!anyColl) break;
-          iter++;
+          if (!anyCollision) break; // Stop if no collisions in this iteration
         }
       }
 
+      /**
+       * Removes nodes and associated links that are far off-screen to the left.
+       * This helps maintain performance by reducing the number of DOM elements
+       * and objects to process.
+       */
       function pruneOffscreen() {
-        const viewHalf = (W / 2) / currentZoom;
-        const cutoffX = scrollX - viewHalf - BUFFER_OFF_SCREEN_REMOVAL / currentZoom;
         if (!nodes.length) return;
+
+        const viewHalfWidth = (W / 2) / currentZoom;
+        const cutoffX = scrollX - viewHalfWidth - BUFFER_OFF_SCREEN_REMOVAL / currentZoom;
+
         const survivors = nodes.filter(d => d.x >= cutoffX);
-        if (survivors.length === nodes.length) return;
+        if (survivors.length === nodes.length) return; // No nodes pruned
+
         const liveIds = new Set(survivors.map(n => n.id));
         nodes = survivors;
         links = links.filter(l => liveIds.has(l.source.id) && liveIds.has(l.target.id));
-        // Also remove any pruned nodes from tipSet:
-        tipSet = tipSet.filter(n => liveIds.has(n.id));
+        tipSet = tipSet.filter(n => liveIds.has(n.id)); // Also prune tips
+
+        // Remove D3 selections for pruned elements
         nodeG.selectAll("g.node-group").filter(d => !liveIds.has(d.id)).remove();
         linkG.selectAll("path.link").filter(d => !liveIds.has(d.source.id) || !liveIds.has(d.target.id)).remove();
       }
 
-      // ————————————————
-      // DRAW THE BACKGROUND GRID (inside <g> so it scrolls)
-      // ————————————————
+      // --- Background Grid ---
       const defs = svg.append("defs");
       const GRID_SMALL = 20, GRID_LARGE_INT = 5, GRID_LARGE = GRID_SMALL * GRID_LARGE_INT;
+
       const gridPattern = defs.append("pattern")
         .attr("id", "gridPattern")
         .attr("width", GRID_LARGE)
         .attr("height", GRID_LARGE)
         .attr("patternUnits", "userSpaceOnUse");
 
+      // Add minor grid lines
       for (let i = 1; i < GRID_LARGE_INT; i++) {
         const pos = i * GRID_SMALL;
         gridPattern.append("line")
@@ -368,25 +429,26 @@
           .attr("x1", 0).attr("y1", pos).attr("x2", GRID_LARGE).attr("y2", pos)
           .attr("stroke", "#333").attr("stroke-width", 0.5);
       }
+      // Add major grid lines
       gridPattern.append("path")
-        .attr("d", `M 0 0 L ${GRID_LARGE} 0`)
+        .attr("d", `M 0 0 L ${GRID_LARGE} 0`) // Horizontal major line
         .attr("stroke", "#555").attr("stroke-width", 1);
       gridPattern.append("path")
-        .attr("d", `M 0 0 L 0 ${GRID_LARGE}`)
+        .attr("d", `M 0 0 L 0 ${GRID_LARGE}`) // Vertical major line
         .attr("stroke", "#555").attr("stroke-width", 1);
 
-      // Create a <g> that holds grid, then all nodes/links
+      // Main SVG group for pan and zoom
       const g = svg.append("g");
 
-      // Draw one giant rect (initial width is small; we'll expand it as blocks appear)
+      // Background grid rectangle, expands as content grows
       let gridRect = g.append("rect")
         .attr("x", 0)
         .attr("y", 0)
-        .attr("width", HORIZONTAL_SPACING) // start narrow—will expand
+        .attr("width", HORIZONTAL_SPACING) // Initial narrow width, will expand
         .attr("height", H)
         .attr("fill", "url(#gridPattern)");
 
-      // Title text (semi-transparent)
+      // Title text
       svg.append("text")
         .attr("x", W / 2).attr("y", H / 25)
         .attr("text-anchor", "middle")
@@ -394,34 +456,40 @@
         .attr("font-family", "sans-serif")
         .attr("font-size", "40px")
         .attr("font-weight", "bold")
-        .attr("fill", "#ff0000")
+        .attr("fill", "#ff0000") // Kaspa-red
         .attr("opacity", 0.5)
         .style("pointer-events", "none")
         .text("BLOCKDAG SIMULATION");
 
-      // Groups for links & nodes (above the grid)
+      // SVG groups for links and nodes (drawn on top of the grid)
       const linkG = g.append("g");
       const nodeG = g.append("g");
 
-      // ————————————————
-      // addColumn: generate a vertical “column” of blocks, link them via Kaspa tipSet
-      // ————————————————
+      /**
+       * Adds a new column of blocks to the DAG.
+       * This involves creating new nodes, linking them to parents using `attachParents`,
+       * positioning them, and handling D3 rendering.
+       * May also perform "backfilling" by adding blocks to previous columns.
+       * @param {number} count - The number of blocks to attempt to add in this column/operation.
+       */
       function addColumn(count) {
         if (count < 1) return;
-        const doGenBack = (Math.random() < 0.3);
-        let level = 1;
+
+        const doGenBack = (Math.random() < 0.3); // 30% chance to backfill
+        let level = 1; // Placeholder for block level/coloring, could be expanded
         const levelSamplePool = nodes.slice(-RECENT_POOL * 2);
         if (levelSamplePool.length) {
           const pick = d3.shuffle(levelSamplePool.slice()).map(d => d.level || 1);
-          level = Math.min(4, d3.max(pick) + 1);
+          level = Math.min(4, d3.max(pick) + 1); // Increment level based on recent blocks
         }
 
-        const colX = nextX;
-        latestBaseX = Math.max(latestBaseX, colX);
-        nextX += HORIZONTAL_SPACING;
+        const colX = nextX; // X-coordinate for this new column
+        latestBaseX = Math.max(latestBaseX, colX); // Update the rightmost extent
+        nextX += HORIZONTAL_SPACING; // Advance X for the next column
         if (!columnMap.has(colX)) columnMap.set(colX, []);
-        let newThisCall = 0;
+        let newBlocksAddedThisCall = 0;
 
+        // Inner function to create a batch of nodes and render them
         function createBatch(numNew, xVal, targetYs, existingArr = [], isBackfill = false) {
           const batch = [];
           for (let i = 0; i < numNew; i++) {
@@ -429,28 +497,30 @@
             const node = {
               id: `B${nodeCounter++}`,
               columnX: xVal,
-              level,
+              level, // Store the calculated level
               x: xVal + randomJitter(MAX_X_JITTER),
               y: clamp(y0, VERTICAL_MARGIN + halfBlockH, H - VERTICAL_MARGIN - halfBlockH)
             };
-            // Link each new node → all current tips, then replace tipSet:
-            attachParents(node);
+            attachParents(node); // Connect to parent blocks and update tip set
             nodes.push(node);
             batch.push(node);
           }
 
-          const combined = existingArr.concat(batch);
-          resolveCollisions(combined, xVal);
+          const combinedNodesInX = existingArr.concat(batch);
+          resolveCollisions(combinedNodesInX, xVal); // Resolve collisions for all nodes at xVal
 
-          if (isBackfill) columnMap.set(xVal, combined);
+          if (isBackfill) columnMap.set(xVal, combinedNodesInX);
           else columnMap.get(xVal).push(...batch);
-          newThisCall += batch.length;
+          newBlocksAddedThisCall += batch.length;
 
-          // DRAW THE NEW BLOCKS
-          const join = nodeG.selectAll("g.node-group").data(batch, d => d.id);
-          const enterSel = join.enter().append("g")
+          // D3: Draw new blocks
+          const nodeJoin = nodeG.selectAll("g.node-group")
+            .data(nodes, d => d.id); // Use all nodes for data binding, then filter for new
+
+          const enterSel = nodeJoin.enter().filter(d => batch.some(nb => nb.id === d.id)) // Process only nodes from current batch
+            .append("g")
             .attr("class", "node-group")
-            .attr("transform", d => `translate(${d.x},${H / 2})`)
+            .attr("transform", d => `translate(${d.x},${H / 2})`) // Start from mid-screen for animation
             .style("opacity", 0);
 
           enterSel.append("rect")
@@ -458,15 +528,15 @@
             .attr("y", -halfBlockH)
             .attr("width", BLOCK_W)
             .attr("height", BLOCK_H)
-            .attr("fill", "#6cf");
+            .attr("fill", "#6cf"); // Default block color
 
           enterSel.append("text")
             .attr("class", "block-label-text")
-            .attr("dy", -halfBlockH - 4)
+            .attr("dy", -halfBlockH - 4) // Position above the block
             .attr("text-anchor", "middle")
             .text(d => d.id);
 
-          const calculatedDelay = randBetween(0, MAX_BURST_JITTER);
+          const calculatedDelay = randBetween(0, MAX_BURST_JITTER); // Stagger appearance
 
           enterSel.transition()
             .delay(calculatedDelay)
@@ -474,191 +544,232 @@
             .attr("transform", d => `translate(${d.x},${d.y})`)
             .style("opacity", 1);
 
-          // DRAW LINKS (only those whose source is in this batch)
+          // D3: Draw new links (only those originating from this batch's nodes)
           const newLinkData = links.filter(l => batch.some(nb => nb.id === l.source.id));
-          const linkJoin = linkG.selectAll("path.link").data(newLinkData, d => `${d.source.id}-${d.target.id}`);
+          const linkJoin = linkG.selectAll("path.link")
+            .data(links, d => `${d.source.id}-${d.target.id}`); // Use all links for data binding
 
-          const linkEnter = linkJoin.enter().append("path")
+          const linkEnter = linkJoin.enter().filter(d => newLinkData.some(nl => nl.source.id === d.source.id && nl.target.id === d.target.id))
+            .append("path")
             .attr("class", "link")
             .style("opacity", 0);
 
           linkEnter.attr("d", d => {
+            // Initial path from source (animated start) to target (fixed)
             return linkPath(d.source.x, H / 2, d.target.x, d.target.y);
           });
 
           linkEnter.transition()
-            .delay(calculatedDelay)
+            .delay(calculatedDelay) // Synchronize with node appearance
             .duration(300)
-            .style("opacity", 1)
+            .style("opacity", connectionsVisible ? 1 : 0) // Respect visibility toggle
             .attrTween("d", function (dLink) {
-              const previousPath = d3.select(this).attr("d");
+              const currentPath = d3.select(this).attr("d");
               const finalPath = computeLinkPath(dLink);
-              return d3.interpolateString(previousPath, finalPath);
+              return d3.interpolateString(currentPath, finalPath);
             });
 
           return batch;
         }
 
-        if (!doGenBack) {
+        if (!doGenBack) { // Standard column generation
           const Ys = computeEvenYs(count);
           createBatch(count, colX, Ys);
-        } else {
-          // Backfill logic (unchanged, except tipSet is managed by attachParents)
-          const actualNew = count > 1 ? count - 1 : 0;
-          if (actualNew > 0) {
-            const YsNew = computeEvenYs(actualNew);
-            createBatch(actualNew, colX, YsNew);
+        } else { // Backfill logic
+          const actualNewInCurrentCol = count > 1 ? count - 1 : 0; // At least one block for backfill
+          if (actualNewInCurrentCol > 0) {
+            const YsNew = computeEvenYs(actualNewInCurrentCol);
+            createBatch(actualNewInCurrentCol, colX, YsNew);
           }
-          const backCount = Math.max(1, count - actualNew);
-          let backCols = Math.ceil(randBetween(1, 2));
-          let backX = colX - backCols * HORIZONTAL_SPACING;
-          if (backX < 0) backX = 0;
-          if (!columnMap.has(backX)) columnMap.set(backX, []);
-          const existing = columnMap.get(backX).slice();
-          const newTotal = existing.length + backCount;
-          const YsBack = computeEvenYs(newTotal);
-          existing.forEach((n, i) => {
-            n.x = n.columnX + randomJitter(MAX_X_JITTER);
-            n.y = clamp(YsBack[i] + randomJitter(MAX_Y_JITTER), VERTICAL_MARGIN + halfBlockH, H - VERTICAL_MARGIN - halfBlockH);
+
+          const backfillCount = Math.max(1, count - actualNewInCurrentCol);
+          let backfillNumCols = Math.ceil(randBetween(1, 2)); // Backfill 1 or 2 columns back
+          let backfillTargetX = colX - backfillNumCols * HORIZONTAL_SPACING;
+          backfillTargetX = Math.max(0, backfillTargetX); // Don't go before X=0
+
+          if (!columnMap.has(backfillTargetX)) columnMap.set(backfillTargetX, []);
+          const existingNodesInBackfillCol = columnMap.get(backfillTargetX).slice();
+          const newTotalInBackfillCol = existingNodesInBackfillCol.length + backfillCount;
+          const YsBackfill = computeEvenYs(newTotalInBackfillCol);
+
+          // Reposition existing nodes in the backfill column
+          existingNodesInBackfillCol.forEach((n, i) => {
+            n.x = n.columnX + randomJitter(MAX_X_JITTER); // Re-jitter X
+            n.y = clamp(YsBackfill[i] + randomJitter(MAX_Y_JITTER), VERTICAL_MARGIN + halfBlockH, H - VERTICAL_MARGIN - halfBlockH);
           });
-          const newYs = YsBack.slice(existing.length);
-          createBatch(backCount, backX, newYs, existing, true);
-          const movedSet = new Set(existing.map(d => d.id));
-          nodeG.selectAll("g.node-group").filter(d => movedSet.has(d.id))
+
+          // Add new nodes to the backfill column
+          const newYsForBackfillBatch = YsBackfill.slice(existingNodesInBackfillCol.length);
+          createBatch(backfillCount, backfillTargetX, newYsForBackfillBatch, existingNodesInBackfillCol, true);
+
+          // Animate moved existing nodes and their links
+          const movedNodeIds = new Set(existingNodesInBackfillCol.map(d => d.id));
+          nodeG.selectAll("g.node-group").filter(d => movedNodeIds.has(d.id))
             .transition().duration(600)
             .attr("transform", d => `translate(${d.x},${d.y})`);
+
           linkG.selectAll("path.link")
             .filter(dLink =>
-              (movedSet.has(dLink.source.id) && dLink.source.columnX === backX) ||
-              (movedSet.has(dLink.target.id) && dLink.target.columnX === backX)
+              (movedNodeIds.has(dLink.source.id) && dLink.source.columnX === backfillTargetX) ||
+              (movedNodeIds.has(dLink.target.id) && dLink.target.columnX === backfillTargetX)
             )
             .transition().duration(600)
             .attrTween("d", function (dLink) {
-              const prev = d3.select(this).attr("d");
-              const next = computeLinkPath(dLink);
-              return d3.interpolateString(prev, next);
+              const prevPath = d3.select(this).attr("d");
+              const finalPath = computeLinkPath(dLink);
+              return d3.interpolateString(prevPath, finalPath);
             });
         }
 
-        if (newThisCall > 0) recordNewBlocks(newThisCall);
+        if (newBlocksAddedThisCall > 0) recordNewBlocks(newBlocksAddedThisCall);
 
-        // Expand the grid‐rect so it still covers everything to the right
+        // Expand the grid rectangle to cover the new content area
         gridRect.attr("width", latestBaseX + W / currentZoom);
       }
 
-      let scrollX = W / 2,
-        lastTimeForScroll = null;
-      d3.timer((elapsed) => {
-        const currentTimeForScroll = performance.now();
+      // --- Scrolling and View Update Loop ---
+      let scrollX = W / 2; // Current horizontal scroll position of the view center
+      let lastTimeForScroll = null;
+
+      // d3.timer manages the main animation loop for scrolling and pruning.
+      d3.timer(() => {
+        const currentTime = performance.now();
         if (lastTimeForScroll !== null && !isPaused) {
-          const targetCenter = latestBaseX;
+          // Smoothly pan the view to keep the latest blocks in sight
+          const targetCenter = latestBaseX; // Aim to center on the latest column
           const diff = targetCenter - scrollX;
-          scrollX += (Math.abs(diff) < 0.1 ? diff : diff * 0.05);
+          scrollX += (Math.abs(diff) < 0.1 ? diff : diff * 0.05); // Proportional scrolling
         }
-        lastTimeForScroll = currentTimeForScroll;
+        lastTimeForScroll = currentTime;
+
+        // Apply pan and zoom transformation to the main SVG group
         g.attr("transform", `translate(${W / 2},${H / 2}) scale(${currentZoom}) translate(${-scrollX},${-H / 2})`);
-        pruneOffscreen();
+        pruneOffscreen(); // Remove off-screen elements periodically
       });
 
-      let blockQueue = [],
-        blocksInWindow = 0;
-      const BPS_WINDOW = 3000;
+      // --- Realtime BPS Calculation ---
+      let blockQueue = []; // Queue of {timestamp, count} for BPS calculation
+      let blocksInWindow = 0; // Total blocks within the BPS_WINDOW
+      const BPS_WINDOW = 3000; // Time window (ms) for calculating BPS
+
       function recordNewBlocks(count) {
         const ts = Date.now();
         blockQueue.push({ ts, count });
         blocksInWindow += count;
-        pruneOldBlockQueue();
+        pruneOldBlockQueue(); // Maintain BPS window
       }
+
       function pruneOldBlockQueue() {
-        const cutoff = Date.now() - BPS_WINDOW;
-        while (blockQueue.length && blockQueue[0].ts < cutoff) {
+        const cutoffTime = Date.now() - BPS_WINDOW;
+        while (blockQueue.length && blockQueue[0].ts < cutoffTime) {
           blocksInWindow -= blockQueue[0].count;
           blockQueue.shift();
         }
       }
+
       function updateRealtimeBPS() {
         pruneOldBlockQueue();
-        const bps = blocksInWindow / (BPS_WINDOW / 1000);
-        realtimeBPS.textContent = bps.toFixed(1);
+        const currentBps = blocksInWindow / (BPS_WINDOW / 1000);
+        realtimeBPS.textContent = currentBps.toFixed(1);
       }
-      setInterval(updateRealtimeBPS, 1000);
+      setInterval(updateRealtimeBPS, 1000); // Update BPS display every second
 
+      /**
+       * Calculates the time interval for the next block generation burst.
+       * The interval is dynamically adjusted based on TARGET_AVG_BPS,
+       * block distribution settings (MIN/MAX_COLUMN_PERCENT), and
+       * includes a random fluctuation.
+       * @param {number} currentTime - The current timestamp (e.g., from performance.now()).
+       * @returns {number} The timestamp for the next scheduled burst.
+       */
       function computeNextInterval(currentTime) {
-        const avg_frac = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
-        const M_based_on_avg_frac = Math.max(1, Math.floor(TARGET_AVG_BPS * avg_frac));
-        let avgBlocks = (M_based_on_avg_frac + 1) / 2;
-        avgBlocks = Math.max(1, avgBlocks);
-        let tcs = TARGET_AVG_BPS / avgBlocks;
-        tcs = Math.max(tcs, 0.01);
-        let avgInterval = 1000 / tcs;
-        avgInterval = Math.max(MIN_INTERVAL_MS, Math.min(MAX_INTERVAL_MS, avgInterval));
-        const fluct = avgInterval * BURST_FLUCT_PERCENT;
-        let minI = Math.max(MIN_INTERVAL_MS, avgInterval - fluct);
-        let maxI = Math.min(MAX_INTERVAL_MS, avgInterval + fluct);
-        if (minI >= maxI) maxI = minI + MIN_INTERVAL_MS * 0.1;
-        return currentTime + randBetween(minI, maxI);
+        // Estimate average blocks per column based on target BPS and column size percentages
+        const avgColSizePercent = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
+        const maxBlocksPerColAtAvg = Math.max(1, Math.floor(TARGET_AVG_BPS * avgColSizePercent));
+        let avgBlocksPerBurst = (maxBlocksPerColAtAvg + 1) / 2; // Average of 1 to maxBlocksPerColAtAvg
+        avgBlocksPerBurst = Math.max(1, avgBlocksPerBurst);
+
+        // Target columns (bursts) per second
+        let targetBurstsPerSecond = TARGET_AVG_BPS / avgBlocksPerBurst;
+        targetBurstsPerSecond = Math.max(targetBurstsPerSecond, 0.01); // Avoid division by zero or too slow
+
+        let avgInterval = 1000 / targetBurstsPerSecond; // Average interval in ms
+        avgInterval = clamp(avgInterval, MIN_INTERVAL_MS, MAX_INTERVAL_MS);
+
+        // Add random fluctuation
+        const fluctuation = avgInterval * BURST_FLUCT_PERCENT;
+        let minInterval = Math.max(MIN_INTERVAL_MS, avgInterval - fluctuation);
+        let maxInterval = Math.min(MAX_INTERVAL_MS, avgInterval + fluctuation);
+        if (minInterval >= maxInterval) maxInterval = minInterval + MIN_INTERVAL_MS * 0.1; // Ensure valid range
+
+        return currentTime + randBetween(minInterval, maxInterval);
       }
 
-      let nextBurstScheduler = performance.now();
-      let schedulerTickCount = 0;
+      // --- Block Generation Scheduler ---
+      let nextBurstScheduler = performance.now(); // Timestamp for the next block burst
 
       function scheduleFirstColumn() {
         const initialCount = Math.max(1, Math.floor(TARGET_AVG_BPS * MIN_COLUMN_PERCENT));
         addColumn(initialCount);
-        nextBurstScheduler = performance.now() + 1;
+        nextBurstScheduler = performance.now() + 1; // Schedule next burst almost immediately
       }
 
-      const scheduler = d3.timer((elapsed) => {
+      // d3.timer manages the main block generation scheduling.
+      const scheduler = d3.timer(() => {
         const currentTime = performance.now();
         if (!isPaused && currentTime >= nextBurstScheduler && TARGET_AVG_BPS > 0) {
+          // Determine number of blocks for this burst
           const frac = randBetween(MIN_COLUMN_PERCENT, MAX_COLUMN_PERCENT);
           const maxBlocksThisRound = Math.max(1, Math.floor(TARGET_AVG_BPS * frac));
-          const n = Math.floor(Math.random() * maxBlocksThisRound) + 1;
+          const numBlocksInBurst = Math.floor(Math.random() * maxBlocksThisRound) + 1;
+
           try {
-            addColumn(n);
+            addColumn(numBlocksInBurst);
           } catch (e) {
-            console.error("ERROR inside addColumn:", e);
-            scheduler.stop();
+            console.error("Error during addColumn:", e);
+            scheduler.stop(); // Stop scheduler on critical error
             return;
           }
+
           nextBurstScheduler = computeNextInterval(currentTime);
           if (isNaN(nextBurstScheduler)) {
-            console.error("ERROR: Scheduler - nextBurstScheduler is NaN!");
+            console.error("Error: Scheduler - nextBurstScheduler is NaN. Stopping scheduler.");
             scheduler.stop();
             return;
           }
-          const avg_frac_for_pause = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
-          const M_based_on_avg_frac_for_pause = Math.max(1, Math.floor(TARGET_AVG_BPS * avg_frac_for_pause));
-          let avgBlocks_for_pause_calc = (M_based_on_avg_frac_for_pause + 1) / 2;
-          avgBlocks_for_pause_calc = Math.max(1, avgBlocks_for_pause_calc);
-          let tcs_for_pause = TARGET_AVG_BPS / avgBlocks_for_pause_calc;
-          if (tcs_for_pause < 0.5 && nodes.length > RECENT_POOL * 3) {
-            isPaused = true;
+
+          // Auto-pause heuristic: if target bursts per second is very low and many blocks exist
+          const avgColSizePercentForPause = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
+          const maxBlocksAtAvgForPause = Math.max(1, Math.floor(TARGET_AVG_BPS * avgColSizePercentForPause));
+          let avgBlocksForPause = (maxBlocksAtAvgForPause + 1) / 2;
+          avgBlocksForPause = Math.max(1, avgBlocksForPause);
+          let targetBurstsPerSecForPause = TARGET_AVG_BPS / avgBlocksForPause;
+
+          if (targetBurstsPerSecForPause < 0.5 && nodes.length > RECENT_POOL * 3) {
+            isPaused = true; // Auto-pause if generation rate is very slow
           } else if (isPaused) {
-            isPaused = false;
+            isPaused = false; // Auto-resume if conditions change
           }
         }
       });
 
-      // ————————————————
-      // EVENT LISTENERS
-      // ————————————————
+      // --- Event Listeners ---
       targetInput.addEventListener("change", e => {
         const val = parseInt(e.target.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 1000) {
+        if (!isNaN(val) && val >= 1 && val <= 1000) { // Input validation
           TARGET_AVG_BPS = val;
-          if (isPaused && TARGET_AVG_BPS > 0) { isPaused = false; }
+          if (isPaused && TARGET_AVG_BPS > 0) { isPaused = false; } // Resume if BPS increased
         } else {
-          e.target.value = TARGET_AVG_BPS;
+          e.target.value = TARGET_AVG_BPS; // Revert to current value if input is invalid
         }
       });
 
       zoomInBtn.addEventListener("click", () => {
         currentZoom *= ZOOM_FACTOR;
         zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
-        // Expand gridRect now that zoom changed
-        gridRect.attr("width", latestBaseX + W / currentZoom);
+        gridRect.attr("width", latestBaseX + W / currentZoom); // Adjust grid size for new zoom
       });
+
       zoomOutBtn.addEventListener("click", () => {
         currentZoom /= ZOOM_FACTOR;
         zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
@@ -667,21 +778,31 @@
 
       showTextToggle.addEventListener("change", e => {
         showText = e.target.checked;
-        svg.classed("show-text", showText);
+        svg.classed("show-text", showText); // Toggle CSS class for text visibility
       });
 
       showConnectionsToggle.addEventListener("change", e => {
         connectionsVisible = e.target.checked;
-        linkG.style("display", connectionsVisible ? null : "none");
+        linkG.style("display", connectionsVisible ? null : "none"); // Toggle link visibility
+        // If turning connections on, ensure new links also respect this
+        if (connectionsVisible) {
+            linkG.selectAll("path.link").style("opacity",1);
+        }
       });
 
       resetBtn.addEventListener("click", resetVis);
 
+      /**
+       * Resets the entire visualization to its initial state.
+       * Clears all nodes, links, and resets control parameters and UI elements.
+       */
       function resetVis() {
+        // Update dimensions in case of window resize
         W = window.innerWidth;
         H = window.innerHeight;
         halfH = H / 2;
 
+        // Clear data structures
         nodes = [];
         links = [];
         blockQueue = [];
@@ -690,17 +811,19 @@
         nodeCounter = 0;
         tipSet = [];
 
+        // Reset positioning and control variables
         nextX = W / 2;
         latestBaseX = W / 2;
         scrollX = W / 2;
-
         currentZoom = 1.0;
         TARGET_AVG_BPS = DEFAULT_TARGET_BPS;
         isPaused = false;
 
+        // Clear D3 rendered elements
         nodeG.selectAll("g.node-group").remove();
         linkG.selectAll("path.link").remove();
 
+        // Reset HUD elements
         targetInput.value = TARGET_AVG_BPS;
         realtimeBPS.textContent = "0.0";
         zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
@@ -710,51 +833,41 @@
         svg.classed("show-text", showText);
 
         showConnectionsToggle.checked = true;
-        connectionsVisible = true;
+        connectionsVisible = showConnectionsToggle.checked;
         linkG.style("display", null);
 
-        // Resize the gridRect to fill new viewport
+        // Reset grid and view
         gridRect
-          .attr("width", HORIZONTAL_SPACING)
+          .attr("width", HORIZONTAL_SPACING) // Reset to initial narrow width
           .attr("height", H);
-
         g.attr("transform", `translate(${W / 2},${H / 2}) scale(${currentZoom}) translate(${-scrollX},${-H / 2})`);
-        svg.select("text[font-size='40px']").attr("x", W / 2).attr("y", H / 25);
+        svg.select("text[font-size='40px']").attr("x", W / 2).attr("y", H / 25); // Reposition title
 
-        scheduleFirstColumn();
+        scheduleFirstColumn(); // Start the simulation anew
       }
 
-      // ————————————————
-      // MOUSE‐WHEEL ZOOM HANDLER
-      // ————————————————
-      // If user scrolls the wheel, zoom in/out exactly as if they clicked “+” or “–”.
+      // --- Mouse Wheel Zoom Handler ---
+      // Handles mouse wheel events for zooming in and out.
       svg.on("wheel", (event) => {
-        // Prevent the default page scroll or pinch‐zoom on touchpads
-        event.preventDefault();
+        event.preventDefault(); // Prevent default page scroll or pinch-zoom
 
-        // event.deltaY < 0 means wheel scrolled UP → zoom in
-        if (event.deltaY < 0) {
+        if (event.deltaY < 0) { // Wheel scrolled UP (or equivalent) -> zoom in
           currentZoom *= ZOOM_FACTOR;
-        } else {
+        } else { // Wheel scrolled DOWN -> zoom out
           currentZoom /= ZOOM_FACTOR;
         }
-
-        // Update the zoom label immediately
         zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
-
-        // Expand the gridRect so it continues covering everything
-        gridRect.attr("width", latestBaseX + W / currentZoom);
+        gridRect.attr("width", latestBaseX + W / currentZoom); // Adjust grid for new zoom
       });
 
-      // ————————————————
-      // INITIAL SETUP
-      // ————————————————
+      // --- Initial Setup ---
       targetInput.value = TARGET_AVG_BPS;
       zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
       showTextToggle.checked = showText;
       svg.classed("show-text", showText);
       showConnectionsToggle.checked = connectionsVisible;
-      scheduleFirstColumn();
+
+      scheduleFirstColumn(); // Kick off the simulation
     })();
   </script>
 </body>
