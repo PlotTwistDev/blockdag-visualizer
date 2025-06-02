@@ -10,14 +10,16 @@
     /* ──────────────────────────────────────────────────────────────────────────
        Base Styles
     ─────────────────────────────────────────────────────────────────────────── */
-    html, body {
+    html,
+    body {
       margin: 0;
       padding: 0;
       background: #111;
       font-family: sans-serif;
       color: #fff;
       overflow-x: hidden;
-      overflow-y: auto; /* Y-scrolling allowed (SVG may exceed viewport) */
+      overflow-y: auto;
+      /* Y-scrolling allowed (SVG may exceed viewport) */
     }
 
     svg {
@@ -43,9 +45,12 @@
        Link (Edge) Styles
     ─────────────────────────────────────────────────────────────────────────── */
     .link {
-      stroke: #87CEFA;          /* LightSkyBlue */
-      stroke-opacity: 0.7;      /* Slightly translucent */
-      stroke-width: 1.5px;      /* Thicker for visibility */
+      stroke: #87CEFA;
+      /* LightSkyBlue */
+      stroke-opacity: 0.7;
+      /* Slightly translucent */
+      stroke-width: 1.5px;
+      /* Thicker for visibility */
       fill: none;
       stroke-linecap: round;
     }
@@ -57,9 +62,12 @@
       fill: #fff;
       font-size: 9px;
       pointer-events: none;
-      opacity: 0;               /* Hidden by default */
-      transition: opacity 0.2s; /* Fade in/out */
+      opacity: 0;
+      /* Hidden by default */
+      transition: opacity 0.2s;
+      /* Fade in/out */
     }
+
     /* When 'show-text' class is applied to the SVG, block-label-text becomes visible */
     .show-text .block-label-text {
       opacity: 1;
@@ -85,8 +93,8 @@
     }
 
     /* Ensure each child (div/span) in HUD is flex-aligned */
-    #hud > div,
-    #hud > span {
+    #hud>div,
+    #hud>span {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -121,6 +129,7 @@
       cursor: pointer;
       font-size: 12px;
     }
+
     #resetBtn:hover {
       background-color: #666;
     }
@@ -140,11 +149,13 @@
         font-size: 11px;
         gap: 8px;
       }
+
       #hud input[type="number"] {
         width: 40px;
       }
-      #hud > div,
-      #hud > span {
+
+      #hud>div,
+      #hud>span {
         gap: 4px;
       }
     }
@@ -208,7 +219,7 @@
   <!-- Load D3.js v7 from CDN -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script>
-    (function() {
+    (function () {
       // ──────────────────────────────────────────────────────────────────────────
       // 1) Dimensions & Pan/Zoom State
       // ──────────────────────────────────────────────────────────────────────────
@@ -236,8 +247,8 @@
       const MAX_COLUMN_PERCENT = 0.80;    // Maximum % of TARGET_AVG_BPS in a column
 
       // Used to compute dynamic vertical spread ratio based on MAX_COLUMN_PERCENT
-      const REFERENCE_UPPER_MAX_COLUMN_PERCENT = 0.80;
-      const REFERENCE_LOWER_MAX_COLUMN_PERCENT = 0.10;
+      const REFERENCE_UPPER_MAX_COLUMN_PERCENT = 0.90;
+      const REFERENCE_LOWER_MAX_COLUMN_PERCENT = 0.40;
       const MIN_SPREAD_RATIO = 0.25;
       const MAX_SPREAD_RATIO = 1.0;
       let normalizedMCP = (MAX_COLUMN_PERCENT - REFERENCE_LOWER_MAX_COLUMN_PERCENT) /
@@ -259,8 +270,8 @@
       const PREFERRED_MAX_BLOCK_CENTER_SPACING_Y = BLOCK_H * 4.0;
 
       const RECENT_POOL = 12;                             // Pool size for parent selection
-      const MAX_X_JITTER = 48;                            // Horizontal jitter when placing blocks
-      const MAX_Y_JITTER = 36;                            // Vertical jitter when placing blocks
+      const MAX_X_JITTER = 4;                            // Horizontal jitter when placing blocks
+      const MAX_Y_JITTER = 12;                            // Vertical jitter when placing blocks
       const COLLISION_ITERS = 50;                         // Number of collision-resolution iterations
       const COLLISION_STEP = 0.5;                         // Step size in collision resolution
       const CHECK_W = BLOCK_W + MIN_SEP;                  // Width used for collision detection
@@ -686,9 +697,9 @@
           const enterSel = nodeJoin.enter()
             .filter(d => batch.some(nb => nb.id === d.id))
             .append("g")
-              .attr("class", "node-group")
-              .attr("transform", d => `translate(${d.x}, ${H / 2})`)
-              .style("opacity", 0);
+            .attr("class", "node-group")
+            .attr("transform", d => `translate(${d.x}, ${H / 2})`)
+            .style("opacity", 0);
 
           // Append a rectangle to represent the block
           enterSel.append("rect")
@@ -707,9 +718,9 @@
             .text(d => d.id)
             .style("opacity", showText ? 1 : 0)
             .transition()
-              .delay(calculatedDelay)
-              .duration(200)
-              .style("opacity", showText ? 1 : 0);
+            .delay(calculatedDelay)
+            .duration(200)
+            .style("opacity", showText ? 1 : 0);
 
           // Animate new blocks from y = H/2 up to their actual y-position
           enterSel.transition()
@@ -717,7 +728,7 @@
             .duration(500)
             .attr("transform", d => `translate(${d.x}, ${d.y})`)
             .style("opacity", 1)
-            .on("end", function() {
+            .on("end", function () {
               d3.select(this).style("opacity", 1);
             });
 
@@ -730,21 +741,21 @@
           const linkEnter = linkJoin.enter()
             .filter(d => newLinkData.some(nl => nl.source.id === d.source.id && nl.target.id === d.target.id))
             .append("path")
-              .attr("class", "link")
-              .style("opacity", 0);
+            .attr("class", "link")
+            .style("opacity", 0);
 
           // Set initial path from block’s x at y=H/2 to parent’s (x, y)
           linkEnter
             .attr("d", d => linkPath(d.source.x, H / 2, d.target.x, d.target.y))
             .transition()
-              .delay(calculatedDelay)
-              .duration(300)
-              .style("opacity", connectionsVisible ? 1 : 0)
-              .attrTween("d", function(dLink) {
-                const prevPath = d3.select(this).attr("d");
-                const finalPath = computeLinkPath(dLink);
-                return d3.interpolateString(prevPath, finalPath);
-              });
+            .delay(calculatedDelay)
+            .duration(300)
+            .style("opacity", connectionsVisible ? 1 : 0)
+            .attrTween("d", function (dLink) {
+              const prevPath = d3.select(this).attr("d");
+              const finalPath = computeLinkPath(dLink);
+              return d3.interpolateString(prevPath, finalPath);
+            });
 
           return batch;
         }
@@ -803,9 +814,9 @@
             nodeG.selectAll("g.node-group")
               .filter(d => movedIds.has(d.id))
               .transition()
-                .duration(600)
-                .attr("transform", d => `translate(${d.x}, ${d.y})`)
-                .style("opacity", 1);
+              .duration(600)
+              .attr("transform", d => `translate(${d.x}, ${d.y})`)
+              .style("opacity", 1);
 
             // Animate affected links in that column
             linkG.selectAll("path.link")
@@ -814,12 +825,12 @@
                 (movedIds.has(dLink.target.id) && dLink.target.columnX === backfillX)
               )
               .transition()
-                .duration(600)
-                .attrTween("d", function(dLink) {
-                  const prev = d3.select(this).attr("d");
-                  const final = computeLinkPath(dLink);
-                  return d3.interpolateString(prev, final);
-                });
+              .duration(600)
+              .attrTween("d", function (dLink) {
+                const prev = d3.select(this).attr("d");
+                const final = computeLinkPath(dLink);
+                return d3.interpolateString(prev, final);
+              });
           }
         }
 
