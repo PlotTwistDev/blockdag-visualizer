@@ -157,6 +157,14 @@
       <input type="checkbox" id="showConnectionsToggle" checked>
       <label for="showConnectionsToggle">Show Connections</label>
     </div>
+    <div>
+      <label for="maxGenBackInput">Max Gens Back:</label>
+      <input type="number" id="maxGenBackInput" value="5" min="1" max="10">
+    </div>
+    <div>
+      <label for="countBackInput">Count Back:</label>
+      <input type="number" id="countBackInput" value="9" min="1" max="20">
+    </div>
     <button id="resetBtn">Reset</button>
   </div>
 
@@ -202,6 +210,11 @@
       normalizedMCP = Math.max(0, Math.min(1, normalizedMCP));
       const DYNAMIC_VERTICAL_SPREAD_RATIO = MIN_SPREAD_RATIO +
         normalizedMCP * (MAX_SPREAD_RATIO - MIN_SPREAD_RATIO);
+
+      // ─── ADDITIONAL PARAMETERS FOR BACKFILL CONTROL ────────────────────────────
+      // How many columns back we may push blocks, and how many blocks max to backfill
+      let MAX_GENERATIONS_BACK = 2;  // allow backfill into up to 2 columns back
+      let COUNT_BACK = 3;            // allow up to 3 blocks to be backfilled
 
       // Block size / collision parameters
       const BLOCK_W = 8, BLOCK_H = 8;
@@ -454,6 +467,8 @@
 
         function createBatch(numNew, xVal, targetYs, existingArr = [], isBackfill = false) {
           const batch = [];
+
+          // 1) Create and assign parents for each new node
           for (let i = 0; i < numNew; i++) {
             const y0 = targetYs[i] + randomJitter(MAX_Y_JITTER);
             const node = {
@@ -468,16 +483,18 @@
             batch.push(node);
           }
 
+          // 2) Resolve collisions (old + new) in column `xVal`
           const combinedInX = existingArr.concat(batch);
           resolveCollisions(combinedInX, xVal);
           if (isBackfill) columnMap.set(xVal, combinedInX);
           else columnMap.get(xVal).push(...batch);
           newBlocksAddedThisCall += batch.length;
 
-          // Draw new nodes:
+          // ─── DRAW NEW NODES & LINKS ───────────────────────────────────────────────
           const nodeJoin = nodeG.selectAll("g.node-group")
             .data(nodes, d => d.id);
 
+          // Only enter the newly created batch
           const enterSel = nodeJoin.enter()
             .filter(d => batch.some(nb => nb.id === d.id))
             .append("g")
@@ -486,6 +503,7 @@
             .attr("transform", d => `translate(${d.x}, ${H / 2})`)
             .style("opacity", 0);
 
+          // Append a rectangle for each new node
           enterSel.append("rect")
             .attr("x", -halfBlockW)
             .attr("y", -halfBlockH)
@@ -493,21 +511,36 @@
             .attr("height", BLOCK_H)
             .attr("fill", "#6cf");
 
+          //
+          // ─── VERY IMPORTANT: calculate the delay *before* any transition
+          //
+          const calculatedDelay = randBetween(0, MAX_BURST_JITTER);
+
+          // Append the label text (force its opacity to 1 if showText=true,
+          // then fade it in over 200ms)
           enterSel.append("text")
             .attr("class", "block-label-text")
             .attr("dy", -halfBlockH - 4)
             .attr("text-anchor", "middle")
-            .text(d => d.id);
+            .text(d => d.id)
+            .style("opacity", showText ? 1 : 0)
+            .transition()
+            .delay(calculatedDelay)
+            .duration(200)
+            .style("opacity", showText ? 1 : 0);
 
-          const calculatedDelay = randBetween(0, MAX_BURST_JITTER);
-
+          // Now transition each <g> down to its final y-position and force opacity=1
           enterSel.transition()
             .delay(calculatedDelay)
-            .duration(300)
+            .duration(500)
             .attr("transform", d => `translate(${d.x}, ${d.y})`)
-            .style("opacity", 1);
+            .style("opacity", 1)
+            .on("end", function () {
+              // In case the transition was interrupted, guarantee opacity=1
+              d3.select(this).style("opacity", 1);
+            });
 
-          // Draw new links:
+          // Draw the new links (only for this batch of new nodes)
           const newLinkData = links.filter(l => batch.some(nb => nb.id === l.source.id));
           const linkJoin = linkG.selectAll("path.link")
             .data(links, d => `${d.source.id}-${d.target.id}`);
@@ -534,53 +567,90 @@
           return batch;
         }
 
+        // ─── NO BACKFILL: put *all* new blocks in this new column ────────────────
         if (!doGenBack) {
           const Ys = computeEvenYs(count);
           createBatch(count, colX, Ys);
+
         } else {
-          // Backfill logic (exactly as before)
-          const actualNewInCurrentCol = count > 1 ? count - 1 : 0;
+          //
+          // ─── UPDATED BACKFILL LOGIC ────────────────────────────────────────────
+          //    • Place at least one block in the new column
+          //    • Send the rest (up to COUNT_BACK) backwards
+          //
+          let actualNewInCurrentCol, backfillCount;
+
+          if (count > COUNT_BACK) {
+            // Normal case: leave (count − COUNT_BACK) blocks here,
+            // send exactly COUNT_BACK backwards
+            actualNewInCurrentCol = count - COUNT_BACK;
+            backfillCount = COUNT_BACK;
+          } else {
+            // If count ≤ COUNT_BACK, force 1 block in this column,
+            // send the other (count − 1) backwards
+            actualNewInCurrentCol = 1;
+            backfillCount = count - 1;
+          }
+
+          // (1) Create whatever belongs in the *current* column:
           if (actualNewInCurrentCol > 0) {
             const YsNew = computeEvenYs(actualNewInCurrentCol);
             createBatch(actualNewInCurrentCol, colX, YsNew);
           }
-          const backfillCount = Math.max(1, count - actualNewInCurrentCol);
-          let backfillNumCols = Math.ceil(randBetween(1, 2));
-          let backfillTargetX = colX - backfillNumCols * HORIZONTAL_SPACING;
-          backfillTargetX = Math.max(0, backfillTargetX);
-          if (!columnMap.has(backfillTargetX)) columnMap.set(backfillTargetX, []);
-          const existingNodesInBackfillCol = columnMap.get(backfillTargetX).slice();
-          const newTotalInBackfillCol = existingNodesInBackfillCol.length + backfillCount;
-          const YsBackfill = computeEvenYs(newTotalInBackfillCol);
 
-          existingNodesInBackfillCol.forEach((n, i) => {
-            n.x = n.columnX + randomJitter(MAX_X_JITTER);
-            n.y = clamp(YsBackfill[i] + randomJitter(MAX_Y_JITTER),
-              10 + halfBlockH,
-              H - 10 - halfBlockH);
-          });
+          // (2) Now place the “backfillCount” blocks into an older column:
+          if (backfillCount > 0) {
+            const backfillNumCols = Math.ceil(randBetween(1, MAX_GENERATIONS_BACK + 1));
+            let backfillTargetX = colX - backfillNumCols * HORIZONTAL_SPACING;
+            backfillTargetX = Math.max(0, backfillTargetX);
 
-          const newYsForBackfillBatch = YsBackfill.slice(existingNodesInBackfillCol.length);
-          createBatch(backfillCount, backfillTargetX, newYsForBackfillBatch, existingNodesInBackfillCol, true);
+            if (!columnMap.has(backfillTargetX)) {
+              columnMap.set(backfillTargetX, []);
+            }
+            const existingNodesInBackfillCol = columnMap.get(backfillTargetX).slice();
+            const newTotalInBackfillCol = existingNodesInBackfillCol.length + backfillCount;
+            const YsBackfill = computeEvenYs(newTotalInBackfillCol);
 
-          const movedNodeIds = new Set(existingNodesInBackfillCol.map(d => d.id));
-          nodeG.selectAll("g.node-group").filter(d => movedNodeIds.has(d.id))
-            .transition().duration(600)
-            .attr("transform", d => `translate(${d.x}, ${d.y})`);
-
-          linkG.selectAll("path.link")
-            .filter(dLink =>
-              (movedNodeIds.has(dLink.source.id) && dLink.source.columnX === backfillTargetX) ||
-              (movedNodeIds.has(dLink.target.id) && dLink.target.columnX === backfillTargetX)
-            )
-            .transition().duration(600)
-            .attrTween("d", function (dLink) {
-              const prevPath = d3.select(this).attr("d");
-              const finalPath = computeLinkPath(dLink);
-              return d3.interpolateString(prevPath, finalPath);
+            // Re‐position existing nodes in that older column so everything re‐spaces evenly
+            existingNodesInBackfillCol.forEach((n, i) => {
+              n.x = n.columnX + randomJitter(MAX_X_JITTER);
+              n.y = clamp(
+                YsBackfill[i] + randomJitter(MAX_Y_JITTER),
+                10 + halfBlockH,
+                H - 10 - halfBlockH
+              );
             });
+
+            // Create the batch of brand‐new backfill blocks
+            const newYsForBackfillBatch = YsBackfill.slice(existingNodesInBackfillCol.length);
+            createBatch(backfillCount, backfillTargetX, newYsForBackfillBatch, existingNodesInBackfillCol, true);
+
+            // Animate any “moved” (existing) nodes and force opacity=1
+            const movedNodeIds = new Set(existingNodesInBackfillCol.map(d => d.id));
+            nodeG.selectAll("g.node-group")
+              .filter(d => movedNodeIds.has(d.id))
+              .transition()
+              .duration(600)
+              .attr("transform", d => `translate(${d.x}, ${d.y})`)
+              .style("opacity", 1);
+
+            // Animate the updated links for those moved nodes
+            linkG.selectAll("path.link")
+              .filter(dLink =>
+                (movedNodeIds.has(dLink.source.id) && dLink.source.columnX === backfillTargetX) ||
+                (movedNodeIds.has(dLink.target.id) && dLink.target.columnX === backfillTargetX)
+              )
+              .transition()
+              .duration(600)
+              .attrTween("d", function (dLink) {
+                const prevPath = d3.select(this).attr("d");
+                const finalPath = computeLinkPath(dLink);
+                return d3.interpolateString(prevPath, finalPath);
+              });
+          }
         }
 
+        // Record how many new blocks we added in this call
         if (newBlocksAddedThisCall > 0) recordNewBlocks(newBlocksAddedThisCall);
 
         // Expand the gridRect to cover whatever new x-values we need
@@ -644,27 +714,21 @@
           // (i) Grab the new scale k:
           currentZoom = event.transform.k;
 
-          // (ii) Immediately reset any translation in D3’s internal state to zero:
-          //      That way, only the scale changes, not our auto-pan:
-          d3.select("#zoomCapture").call(
-            zoomBehavior.transform,
-            d3.zoomIdentity.scale(currentZoom)
-          );
-
-          // (iii) Update the HUD’s zoom‐level display:
+          // (ii) Update the HUD’s zoom‐level display:
           document.getElementById("zoomLevelDisplay").textContent = `${currentZoom.toFixed(2)}x`;
+
+          // (iii) ALWAYS re‐draw <g> using our own scrollX + currentZoom
+          g.attr(
+            "transform",
+            `translate(${W / 2}, ${H / 2})
+             scale(${currentZoom})
+             translate(${-scrollX}, ${-H / 2})`
+          );
         });
 
-      // 2) Instead of svg.call(...), attach zoomBehavior to the transparent rect:
-      d3.select("#zoomCapture")
-        .call(zoomBehavior)
-        .on("dblclick.zoom", null); // (optional) disable double‐click zoom
-
-      // Attach the zoomBehavior to the SVG so that:
-      //  • Mouse‐wheel zoom (desktop) works
-      //  • Two‐finger pinch (mobile) works
+      // Attach zoomBehavior to the SVG for both mouse-wheel and pinch:
       svg.call(zoomBehavior)
-        // (Optional) disable double-click-to-zoom
+        // (Optional) disable double‐click‐to‐zoom
         .on("dblclick.zoom", null);
 
       // ─── 8) Auto‐pan / Render Loop ─────────────────────────────────────────────
@@ -719,6 +783,8 @@
       const resetBtn = document.getElementById("resetBtn");
       const showTextToggle = document.getElementById("showTextToggle");
       const showConnectionsToggle = document.getElementById("showConnectionsToggle");
+      const maxGenBackInput = document.getElementById("maxGenBackInput");
+      const countBackInput = document.getElementById("countBackInput");
       let showText = true;
       let connectionsVisible = true;
 
@@ -732,25 +798,48 @@
         }
       });
 
-      // “+” / “−” zoom buttons now drive D3’s zoomBehavior so it only changes the scale:
+      maxGenBackInput.addEventListener("change", e => {
+        const v = parseInt(e.target.value, 10);
+        if (!isNaN(v) && v >= 1 && v <= 10) {
+          MAX_GENERATIONS_BACK = v;
+        } else {
+          e.target.value = MAX_GENERATIONS_BACK;
+        }
+      });
+
+      countBackInput.addEventListener("change", e => {
+        const v = parseInt(e.target.value, 10);
+        if (!isNaN(v) && v >= 1 && v <= 20) {
+          COUNT_BACK = v;
+        } else {
+          e.target.value = COUNT_BACK;
+        }
+      });
+
+      // Use the SVG element itself for zoom buttons:
       zoomInBtn.addEventListener("click", () => {
-        // Call scaleBy on the same element that we attached the zoom to:
-        d3.select("#zoomCapture")
-          .transition()
+        svg.transition()
           .duration(300)
           .call(zoomBehavior.scaleBy, 1.2);
       });
       zoomOutBtn.addEventListener("click", () => {
-        d3.select("#zoomCapture")
-          .transition()
+        svg.transition()
           .duration(300)
           .call(zoomBehavior.scaleBy, 1 / 1.2);
       });
 
+      // ─── Show Text Toggle: force all labels to full opacity when re-enabled ───
       showTextToggle.addEventListener("change", e => {
         showText = e.target.checked;
         svg.classed("show-text", showText);
+
+        if (showText) {
+          // Make *all* existing labels fully opaque right away
+          svg.selectAll(".block-label-text")
+            .style("opacity", 1);
+        }
       });
+
       showConnectionsToggle.addEventListener("change", e => {
         connectionsVisible = e.target.checked;
         linkG.style("display", connectionsVisible ? null : "none");
@@ -789,6 +878,10 @@
         showConnectionsToggle.checked = true;
         connectionsVisible = true;
         linkG.style("display", null);
+
+        // Reset backfill controls to defaults
+        maxGenBackInput.value = MAX_GENERATIONS_BACK = 5;
+        countBackInput.value = COUNT_BACK = 9;
 
         // Reset the gridRect to just one column’s width
         gridRect
