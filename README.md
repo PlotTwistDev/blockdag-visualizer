@@ -34,9 +34,6 @@ https://PlotTwistDev.github.io/blockdag-visualizer
 3. Select the `main` branch and the `/root` folder (or `/docs` if applicable).  
 4. Click **Save**.
 
-Your visualization will be live at:  
-`https://PlotTwistDev.github.io/blockdag-visualizer`
-
 ## Installation
 
 Clone the repo:
