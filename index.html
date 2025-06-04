@@ -59,21 +59,25 @@
     }
 
     /* ──────────────────────────────────────────────────────────────────────────
-       Link (Edge) Styles
+       Enhanced Node Styles & Animations
     ────────────────────────────────────────────────────────────────────────── */
-    .link {
-      stroke: #70A0D0;
-      /* Kaspa-style blue */
-      stroke-opacity: 0.7;
-      /* Slightly transparent */
-      stroke-width: 1.5px;
-      fill: none;
-      stroke-linecap: round;
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+
+      50% {
+        transform: scale(1.15);
+        opacity: 0.8;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
     }
 
-    /* ──────────────────────────────────────────────────────────────────────────
-       Block (Node) Styles
-    ────────────────────────────────────────────────────────────────────────── */
     .node-group rect {
       rx: 2;
       ry: 2;
@@ -84,11 +88,26 @@
       /* Fill is assigned via JS using gradients */
     }
 
-    /* Distinct outline for tip (latest) blocks */
     .tip-node rect {
       stroke: #FFD700;
       /* Gold outline */
+      stroke-width: 1.2px;
+      /* Slightly thicker */
+    }
+
+    .node-group.selected-node rect {
+      stroke: #00FFAA;
+      stroke-width: 2px;
+      filter: drop-shadow(0 0 5px #00FFAA);
+    }
+
+    .node-group.connected-node rect {
+      stroke: #80FFDD;
       stroke-width: 1px;
+    }
+
+    .node-group.dimmed-node {
+      opacity: 0.3;
     }
 
     /* Block label text (appears on hover/show-text toggle) */
@@ -105,6 +124,33 @@
       opacity: 1;
     }
 
+
+    /* ──────────────────────────────────────────────────────────────────────────
+       Enhanced Link (Edge) Styles
+    ────────────────────────────────────────────────────────────────────────── */
+    .link {
+      stroke: #70A0D0;
+      stroke-opacity: 0.7;
+      stroke-width: 1.5px;
+      fill: none;
+      stroke-linecap: round;
+      transition: stroke-opacity 0.3s, stroke-width 0.3s, stroke 0.3s;
+      /* Smooth transitions for highlighting */
+    }
+
+    .link.highlighted-link {
+      stroke: #00CFE0;
+      /* Brighter for highlight */
+      stroke-opacity: 1;
+      stroke-width: 2.5px;
+    }
+
+    .link.dimmed-link {
+      stroke-opacity: 0.15;
+    }
+
+    /* Removed @keyframes dashFlow and .link-flow-active */
+
     /* ──────────────────────────────────────────────────────────────────────────
        Tooltip Style (Single shared tooltip)
     ────────────────────────────────────────────────────────────────────────── */
@@ -116,6 +162,33 @@
       pointer-events: none;
       opacity: 0;
       transition: opacity 0.1s linear;
+      /* Basic background for readability */
+      paint-order: stroke;
+      stroke: rgba(10, 5, 30, 0.8);
+      /* Match HUD bg for consistency */
+      stroke-width: 6px;
+      /* Creates padding */
+      stroke-linejoin: round;
+    }
+
+    .tooltip-text tspan {
+      text-anchor: middle;
+    }
+
+
+    /* ──────────────────────────────────────────────────────────────────────────
+       Ambient Effects
+    ────────────────────────────────────────────────────────────────────────── */
+    .shooting-star {
+      fill: rgba(200, 220, 255, 0.8);
+      filter: blur(1px);
+      pointer-events: none;
+    }
+
+    .new-column-beacon {
+      stroke-width: 3px;
+      stroke-linecap: round;
+      pointer-events: none;
     }
 
     /* ──────────────────────────────────────────────────────────────────────────
@@ -198,6 +271,31 @@
       border-color: #FF6060;
     }
 
+    /* Pause button styles */
+    #hud button#pauseBtn {
+      padding: 6px 10px;
+      background-color: #4060C0;
+      /* A different color */
+      color: #fff;
+      border: 1px solid #3040A0;
+    }
+
+    #hud button#pauseBtn:hover {
+      background-color: #5070E0;
+      border-color: #7090FF;
+    }
+
+    #hud button#pauseBtn.paused {
+      background-color: #C08030;
+      /* Orange when paused */
+      border: 1px solid #A06020;
+    }
+
+    #hud button#pauseBtn.paused:hover {
+      background-color: #E09040;
+      border-color: #FFA060;
+    }
+
     /* Responsive HUD tweaks for small screens */
     @media (max-width: 480px) {
       #hud {
@@ -255,6 +353,7 @@
       <input type="number" id="maxParentsInput" value="3" min="1" max="10" />
     </div>
     <button id="resetBtn">Reset</button>
+    <button id="pauseBtn">Pause</button>
   </div>
 
   <!-- SVG container for D3-rendered BlockDAG -->
@@ -277,6 +376,13 @@
       let isPaused = false;
       let latestBaseX = W / 2;
       let nextX = W / 2;
+
+      let selectedNodeId = null; // For click interaction
+      // Removed activeFlowTimeouts and LINK_FLOW_DURATION
+
+      // For tip pulsing
+      let tipPulseTimer;
+      const TIP_PULSE_INTERVAL = 2100; // slightly > animation duration
 
       /* ──────────────────────────────────────────────────────────────────────────
          BPS & Burst Timing Constants
@@ -359,12 +465,23 @@
       }
 
       defineGradient("blockGradientDefault", "#50E0F0", "#00A0B0");
-      defineGradient("blockGradientTip", "#FFFFA0", "#FFD700");
+      defineGradient("blockGradientTip", "#FFFFA0", "#FFD700", 1, 0.8);
+      defineGradient("blockGradientSelected", "#00FFAA", "#00CC88");
+      defineGradient("blockGradientConnected", "#A0FFEE", "#60DDC8");
+
       levelColors.forEach((color, i) => {
         const brighter = d3.color(color).brighter(0.5).formatHex();
         const darker = d3.color(color).darker(0.3).formatHex();
         defineGradient(`levelGradient${i}`, brighter, darker);
       });
+
+      const beaconGradient = defs.append("linearGradient")
+        .attr("id", "beaconGradient")
+        .attr("x1", "0%").attr("y1", "0%")
+        .attr("x2", "0%").attr("y2", "100%");
+      beaconGradient.append("stop").attr("offset", "0%").style("stop-color", "#00CFE0").style("stop-opacity", 0);
+      beaconGradient.append("stop").attr("offset", "50%").style("stop-color", "#00CFE0").style("stop-opacity", 0.8);
+      beaconGradient.append("stop").attr("offset", "100%").style("stop-color", "#00CFE0").style("stop-opacity", 0);
 
       const GRID_SMALL = 20;
       const GRID_LARGE_INT = 5;
@@ -389,10 +506,17 @@
         .attr("text-anchor", "middle").attr("dominant-baseline", "central")
         .text("BLOCKDAG SIM");
 
+      const effectsG = g.append("g").attr("id", "effectsGroup");
       const linkG = g.append("g").attr("id", "linkGroup");
       const nodeG = g.append("g").attr("id", "nodeGroup");
       const tooltipG = g.append("g").attr("id", "tooltipGroup").style("pointer-events", "none");
       const singleTooltip = tooltipG.append("text").attr("class", "tooltip-text").attr("dy", "-0.5em");
+
+      svg.on("click", function (event) {
+        if (event.target === svg.node() || event.target === g.node() || event.target === gridRect.node()) {
+          clearSelection();
+        }
+      });
 
       /* ──────────────────────────────────────────────────────────────────────────
          3) Helper Functions
@@ -415,16 +539,97 @@
       function computeLinkPath(d) { return linkPath(d.source.x, d.source.y, d.target.x, d.target.y); }
       function getRecentNodes() { return nodes.slice(-RECENT_POOL); }
 
+
+      function clearSelection() {
+        selectedNodeId = null;
+        nodeG.selectAll("g.node-group")
+          .classed("selected-node", false)
+          .classed("connected-node", false)
+          .classed("dimmed-node", false)
+          .select("rect")
+          .attr("fill", d => {
+            const isTip = tipSet.has(d);
+            return isTip ? "url(#blockGradientTip)" : `url(#levelGradient${d.level % levelColors.length})`;
+          });
+        linkG.selectAll("path.link")
+          .classed("highlighted-link", false)
+          .classed("dimmed-link", false);
+      }
+
+      function applySelectionStyles(clickedNode) {
+        selectedNodeId = clickedNode.id;
+        const connectedLinkIds = new Set();
+        const connectedNodeIds = new Set([clickedNode.id]);
+
+        links.forEach(link => {
+          if (link.source.id === clickedNode.id || link.target.id === clickedNode.id) {
+            connectedLinkIds.add(`${link.source.id}-${link.target.id}`);
+            connectedNodeIds.add(link.source.id);
+            connectedNodeIds.add(link.target.id);
+          }
+        });
+
+        nodeG.selectAll("g.node-group")
+          .classed("selected-node", d => d.id === clickedNode.id)
+          .classed("connected-node", d => d.id !== clickedNode.id && connectedNodeIds.has(d.id))
+          .classed("dimmed-node", d => !connectedNodeIds.has(d.id))
+          .select("rect")
+          .attr("fill", d => {
+            if (d.id === clickedNode.id) return "url(#blockGradientSelected)";
+            if (connectedNodeIds.has(d.id)) return "url(#blockGradientConnected)";
+            const isTip = tipSet.has(d);
+            return isTip ? "url(#blockGradientTip)" : `url(#levelGradient${d.level % levelColors.length})`;
+          });
+
+        linkG.selectAll("path.link")
+          .classed("highlighted-link", d => connectedLinkIds.has(`${d.source.id}-${d.target.id}`))
+          .classed("dimmed-link", d => !connectedLinkIds.has(`${d.source.id}-${d.target.id}`));
+      }
+
+
       function updateNodeVisuals() {
+        if (selectedNodeId) {
+          const selNode = nodes.find(n => n.id === selectedNodeId);
+          if (selNode) applySelectionStyles(selNode);
+          else clearSelection();
+          return;
+        }
+
         nodeG.selectAll("g.node-group")
           .each(function (d) {
             const nodeElement = d3.select(this);
             const isTip = tipSet.has(d);
             nodeElement.classed("tip-node", isTip);
             let fillStyle = `url(#levelGradient${d.level % levelColors.length})`;
-            if (isTip) fillStyle = "url(#blockGradientTip)";
+            if (isTip) {
+              fillStyle = "url(#blockGradientTip)";
+            }
             nodeElement.select("rect").attr("fill", fillStyle);
           });
+        if (!isPaused) startTipPulsing(); else stopTipPulsing();
+      }
+
+
+      function startTipPulsing() {
+        if (isPaused) return;
+        stopTipPulsing();
+        function pulseTips() {
+          if (isPaused) { stopTipPulsing(); return; }
+          nodeG.selectAll("g.tip-node rect")
+            .style("animation", "none");
+          requestAnimationFrame(() => {
+            if (isPaused) { stopTipPulsing(); return; }
+            nodeG.selectAll("g.tip-node rect")
+              .style("animation", "pulse 2s ease-in-out infinite");
+          });
+          tipPulseTimer = setTimeout(pulseTips, TIP_PULSE_INTERVAL);
+        }
+        pulseTips();
+      }
+
+      function stopTipPulsing() {
+        clearTimeout(tipPulseTimer);
+        nodeG.selectAll("g.tip-node rect").style("animation", "none");
       }
 
       function attachParents(newNode) {
@@ -539,45 +744,25 @@
 
       function pruneOffscreen() {
         if (!nodes.length) return;
-
-        // Compute the left edge of visible area in world coordinates
         const leftWorld = scrollX - (W / (2 * currentZoom));
-        // Anything left of this cutoffX should be pruned—unless it has justMoved flag
         const cutoffX = leftWorld - (W / currentZoom);
-
-        // Keep nodes whose x >= cutoffX OR those that are still animating (justMoved)
         const survivors = nodes.filter(d => (d.x >= cutoffX) || (d.justMoved));
 
-        if (survivors.length === nodes.length) {
-          // Nothing to prune
-          return;
-        }
+        if (survivors.length === nodes.length) return;
 
-        // Build a Set of IDs to keep
         const liveIds = new Set(survivors.map(n => n.id));
         nodes = survivors;
-
-        // Filter out links whose source/target was pruned
         links = links.filter(l => liveIds.has(l.source.id) && liveIds.has(l.target.id));
-
-        // Rebuild tipSet
         const newTipSet = new Set();
-        tipSet.forEach(tip => {
-          if (liveIds.has(tip.id)) {
-            newTipSet.add(tip);
-          }
-        });
+        tipSet.forEach(tip => { if (liveIds.has(tip.id)) newTipSet.add(tip); });
         tipSet = newTipSet;
 
-        // Remove SVG elements for pruned nodes and links
-        nodeG.selectAll("g.node-group")
-          .filter(d => !liveIds.has(d.id))
-          .remove();
+        nodeG.selectAll("g.node-group").filter(d => !liveIds.has(d.id)).remove();
+        linkG.selectAll("path.link").filter(d => !liveIds.has(d.source.id) || !liveIds.has(d.target.id)).remove();
 
-        linkG.selectAll("path.link")
-          .filter(d => !liveIds.has(d.source.id) || !liveIds.has(d.target.id))
-          .remove();
-
+        if (selectedNodeId && !liveIds.has(selectedNodeId)) {
+          clearSelection();
+        }
         updateNodeVisuals();
       }
 
@@ -586,11 +771,7 @@
       ────────────────────────────────────────────────────────────────────────── */
       function addColumn(count) {
         if (count < 1) return;
-
-        // Randomly decide if we should backfill older generations
         const doGenBack = Math.random() < 0.3;
-
-        // Determine block "level" using a sample of recent nodes
         let level = 1;
         const levelSamplePool = nodes.slice(-RECENT_POOL * 2);
         if (levelSamplePool.length) {
@@ -598,354 +779,193 @@
           level = Math.min(levelColors.length - 1, d3.max(pick) + 1);
         }
 
-        // Set column X coordinate for new column. This 'colX' is the X of the "present" or "newest" column for this burst.
         const colX = nextX;
         latestBaseX = Math.max(latestBaseX, colX);
         nextX += HORIZONTAL_SPACING;
-
-        // Initialize columnMap entry if needed
         if (!columnMap.has(colX)) columnMap.set(colX, []);
-
         let newBlocksAddedThisCall = 0;
 
-        /**
-         * Create and append a batch of new blocks at x = xVal,
-         * distributed at targetYs (array of y positions).
-         * If isBackfill is true, we re-layout existing nodes in that column first.
-         * 'xVal' is the target columnX for the blocks being created in this batch.
-         */
+        if (count > 0) {
+          effectsG.append("line")
+            .attr("class", "new-column-beacon")
+            .attr("x1", colX).attr("y1", 0).attr("x2", colX).attr("y2", H)
+            .attr("stroke", "url(#beaconGradient)")
+            .style("opacity", 0.8)
+            .transition().duration(1500).style("opacity", 0).remove();
+        }
+
         function createBatch(numNew, xVal, targetYs, existingArr = [], isBackfill = false) {
           const batch = [];
-
-          // Instantiate new node objects
           for (let i = 0; i < numNew; i++) {
             const node = {
-              id: `B${nodeCounter++}`,
-              columnX: xVal, // The actual (final) column X for this node
-              level,
-              x: xVal + randomJitter(MAX_X_JITTER), // Final X position
-              y: targetYs[i] + randomJitter(MAX_Y_JITTER) // Final Y position
+              id: `B${nodeCounter++}`, columnX: xVal, level,
+              x: xVal + randomJitter(MAX_X_JITTER),
+              y: targetYs[i] + randomJitter(MAX_Y_JITTER)
             };
-
-            // Attach parent links
             attachParents(node);
             nodes.push(node);
             batch.push(node);
           }
-
-          // Combine with existing nodes if backfilling, and resolve collisions
           const combined = existingArr.concat(batch);
           resolveCollisions(combined, xVal);
-
-          // Update columnMap for backfill or append new blocks
-          if (isBackfill) {
-            columnMap.set(xVal, combined);
-          } else {
-            columnMap.get(xVal).push(...batch);
-          }
-
+          if (isBackfill) columnMap.set(xVal, combined);
+          else columnMap.get(xVal).push(...batch);
           newBlocksAddedThisCall += batch.length;
 
-          /* ──────────────────────────────────────────────────────────────────────
-             D3 Data Join for new nodes: create <g class="node-group"> for each
-          ────────────────────────────────────────────────────────────────────── */
           const nodeJoin = nodeG.selectAll("g.node-group").data(nodes, d => d.id);
           const enterSel = nodeJoin.enter()
-            .filter(d => batch.some(nb => nb.id === d.id)) // Only select newly added nodes
+            .filter(d => batch.some(nb => nb.id === d.id))
             .append("g")
             .attr("class", "node-group")
             .each(function (dNode) {
-              // 'colX' (from addColumn's scope) is the X of the current "newest" column for this burst.
-              // 'dNode.columnX' is the actual column X where this dNode will finally be placed.
-              // 'dNode.x' and 'dNode.y' are the final target positions.
               const isNodeEffectivelyBackfilled = dNode.columnX < colX;
-
               if (isNodeEffectivelyBackfilled) {
-                // This node is being placed in a column older than the current primary "new" column (colX).
-                // Animate it "flying in" from a column just to the right of its final destination column.
-                dNode.anim_initialVerticalOffset = (Math.random() - 0.5) * Math.min(80, H * 0.05); // Smaller vertical jitter, relative to its final Y
-                dNode.anim_initialY = dNode.y + dNode.anim_initialVerticalOffset;                 // Start Y near its final Y (dNode.y)
-
-                // Start X from a column just to the right of its target backfill column (dNode.columnX).
-                const originXForBackfill = dNode.columnX + HORIZONTAL_SPACING; // The column to its immediate right
-                const randomDirection = (Math.random() < 0.5 ? -1 : 1); // Slight left/right variety from this originX
-                // Smaller horizontal offset since it's coming from a closer column
+                dNode.anim_initialVerticalOffset = (Math.random() - 0.5) * Math.min(80, H * 0.05);
+                dNode.anim_initialY = dNode.y + dNode.anim_initialVerticalOffset;
+                const originXForBackfill = dNode.columnX + HORIZONTAL_SPACING;
+                const randomDirection = (Math.random() < 0.5 ? -1 : 1);
                 dNode.anim_initialHorizontalOffset = randomDirection * (HORIZONTAL_SPACING * 0.05 + Math.random() * HORIZONTAL_SPACING * 0.1);
                 dNode.anim_initialX = originXForBackfill + dNode.anim_initialHorizontalOffset;
-
               } else {
-                // This is a regular new node, being placed in the current primary "new" column (where dNode.columnX == colX).
-                // Original animation: animates from a general vertical center position, offset horizontally from its final X.
                 dNode.anim_initialVerticalOffset = (Math.random() - 0.5) * Math.min(150, H * 0.15);
-                dNode.anim_initialY = (H / 2) + dNode.anim_initialVerticalOffset; // Start Y from general screen center
-
+                dNode.anim_initialY = (H / 2) + dNode.anim_initialVerticalOffset;
                 const randomDirection = (Math.random() < 0.5 ? -1 : 1);
                 const horizontalOffsetMagnitude = (HORIZONTAL_SPACING * 0.25 + Math.random() * HORIZONTAL_SPACING * 0.35);
                 dNode.anim_initialHorizontalOffset = randomDirection * horizontalOffsetMagnitude;
-                // Start X offset from its final X (dNode.x)
                 dNode.anim_initialX = dNode.x + dNode.anim_initialHorizontalOffset;
               }
-
-              dNode.anim_initialScale = 1; // Node starts at full scale
-
-              // Verify no NaN animation properties AFTER all anim_ values are set
-              if (
-                isNaN(dNode.anim_initialX) ||
-                isNaN(dNode.anim_initialY) ||
-                isNaN(dNode.anim_initialScale)
-              ) {
-                console.error(`ERROR Node ${dNode.id}: NaN in initial animation properties! Backfilled: ${isNodeEffectivelyBackfilled}, NodeColumnX: ${dNode.columnX}, NewestColX: ${colX}, FinalX: ${dNode.x}, FinalY: ${dNode.y}`);
-                // Provide safe defaults to prevent breaking the transform attribute
-                dNode.anim_initialX = dNode.x || (W / 2);
-                dNode.anim_initialY = dNode.y || (H / 2);
-                dNode.anim_initialScale = 1;
+              dNode.anim_initialScale = 0.3;
+              if (isNaN(dNode.anim_initialX) || isNaN(dNode.anim_initialY) || isNaN(dNode.anim_initialScale)) {
+                console.error(`ERROR Node ${dNode.id}: NaN in initial animation properties!`);
+                dNode.anim_initialX = dNode.x || (W / 2); dNode.anim_initialY = dNode.y || (H / 2); dNode.anim_initialScale = 1;
               }
             })
-            .attr("transform", dNode => `translate(${dNode.anim_initialX}, ${dNode.anim_initialY}) scale(${dNode.anim_initialScale})`) // This will now be scale(1)
-            .style("opacity", 0); // Start invisible
+            .attr("transform", dNode => `translate(${dNode.anim_initialX}, ${dNode.anim_initialY}) scale(${dNode.anim_initialScale})`)
+            .style("opacity", 0);
 
-          // Append block rectangle
           enterSel.append("rect")
-            .attr("x", -halfBlockW)
-            .attr("y", -halfBlockH)
-            .attr("width", BLOCK_W)
-            .attr("height", BLOCK_H);
+            .attr("x", -halfBlockW).attr("y", -halfBlockH)
+            .attr("width", BLOCK_W).attr("height", BLOCK_H);
 
-          // Append block label text (always created but may be hidden)
           enterSel.append("text")
             .attr("class", "block-label-text")
-            .attr("dy", -halfBlockH - 4)
-            .attr("text-anchor", "middle")
+            .attr("dy", -halfBlockH - 4).attr("text-anchor", "middle")
             .text(dNode => dNode.id)
             .style("opacity", 0)
-            .transition("textAppear")
-            .delay(dNode => randBetween(0, MAX_BURST_JITTER) + 350)
-            .duration(200)
+            .transition("textAppear").delay(dNode => randBetween(0, MAX_BURST_JITTER) + 350).duration(200)
             .style("opacity", showText ? 1 : 0);
 
-          // Mouseover/mouseout for tooltip
           enterSel.on("mouseover", function (event, dNode) {
+            if (selectedNodeId && d3.select(this).classed('dimmed-node')) return;
+            const parentIds = links.filter(l => l.source.id === dNode.id).map(l => l.target.id.replace("B", ""));
+            const childIds = links.filter(l => l.target.id === dNode.id).map(l => l.source.id.replace("B", ""));
             singleTooltip
-              .attr("x", dNode.x)
-              .attr("y", dNode.y - halfBlockH - 6)
-              .text(`ID: ${dNode.id}`)
-              .style("opacity", 1);
+              .attr("x", dNode.x).attr("y", dNode.y - halfBlockH - 8)
+              .selectAll("tspan").data([
+                `ID: ${dNode.id} | Lvl: ${dNode.level}`,
+                `P: ${parentIds.length > 0 ? parentIds.slice(0, 3).join(',') + (parentIds.length > 3 ? '...' : '') : '0'} | C: ${childIds.length > 0 ? childIds.slice(0, 3).join(',') + (childIds.length > 3 ? '...' : '') : '0'}`
+              ]).join("tspan")
+              .attr("x", dNode.x).attr("dy", (d, i) => i === 0 ? 0 : "1.2em")
+              .text(dText => dText);
+            singleTooltip.style("opacity", 1);
           }).on("mouseout", function () {
             singleTooltip.style("opacity", 0);
+          }).on("click", function (event, dNode) {
+            event.stopPropagation();
+            if (selectedNodeId === dNode.id) clearSelection();
+            else { clearSelection(); applySelectionStyles(dNode); }
+            updateNodeVisuals();
           });
 
-          /* ──────────────────────────────────────────────────────────────────────
-             Node Entry Animation: Move from initial position/scale to final
-          ────────────────────────────────────────────────────────────────────── */
           enterSel.transition("nodeEntry")
             .delay(dNode => randBetween(0, MAX_BURST_JITTER))
-            .duration(DURATION_NODE_ENTRY) // Use the constant (750ms)
-            // MODIFICATION 3: Ensure final transform also uses scale(1) (it already does implicitly)
-            .attr("transform", dNode => `translate(${dNode.x}, ${dNode.y}) scale(1)`) // This implicitly means scale goes from anim_initialScale to 1
+            .duration(DURATION_NODE_ENTRY)
+            .attr("transform", dNode => `translate(${dNode.x}, ${dNode.y}) scale(1)`)
             .style("opacity", 1)
-            .on("interrupt", function (dNode) {
-              d3.select(this)
-                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`) // Ensure scale(1) on interrupt
-                .style("opacity", 1);
-            })
-            .on("end", function (dNode) {
-              d3.select(this)
-                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`) // Ensure scale(1) on end
-                .style("opacity", 1);
-            });
-            
-          /* ──────────────────────────────────────────────────────────────────────
-             Data join and animation for new links
-          ────────────────────────────────────────────────────────────────────── */
+            .on("interrupt", function (dNode) { d3.select(this).attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`).style("opacity", 1); })
+            .on("end", function (dNode) { d3.select(this).attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`).style("opacity", 1); });
+
           const newLinkData = links.filter(l => batch.some(nb => nb.id === l.source.id));
           const linkJoin = linkG.selectAll("path.link").data(links, d => `${d.source.id}-${d.target.id}`);
-
           const linkEnter = linkJoin.enter()
             .filter(d => newLinkData.some(nl => nl.source.id === d.source.id && nl.target.id === d.target.id))
-            .append("path")
-            .attr("class", "link")
-            .style("opacity", 0); // Start invisible, will fade in
+            .append("path").attr("class", "link").style("opacity", 0);
+          // Removed .classed("link-flow-active", true)
 
-          // For each entering link, define its animation
           linkEnter.each(function (dLink) {
             const linkElement = d3.select(this);
-            const srcNode = dLink.source; // The new block
-            const tgtNode = dLink.target; // The parent block
-
-            // Ensure all coordinates are valid before proceeding
-            if (
-              isNaN(srcNode.anim_initialX) || isNaN(srcNode.anim_initialY) ||
-              isNaN(srcNode.x) || isNaN(srcNode.y) ||
-              isNaN(tgtNode.x) || isNaN(tgtNode.y)
-            ) {
-              console.error(`ERROR Link Setup (Direct Connect): NaN in coordinates for link ${srcNode.id}->${tgtNode.id}.`);
-              linkElement.attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
-              return;
+            const srcNode = dLink.source, tgtNode = dLink.target;
+            if (isNaN(srcNode.anim_initialX) || isNaN(srcNode.anim_initialY) || isNaN(srcNode.x) || isNaN(srcNode.y) || isNaN(tgtNode.x) || isNaN(tgtNode.y)) {
+              console.error(`ERROR Link Setup: NaN in coordinates for link ${srcNode.id}->${tgtNode.id}.`);
+              linkElement.attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0); return;
             }
-
-            // Initial path: Source at its animation start, Target at its final fixed position.
-            const initialPath = linkPath(
-              srcNode.anim_initialX,
-              srcNode.anim_initialY,
-              tgtNode.x, // Target X is fixed
-              tgtNode.y  // Target Y is fixed
-            );
+            const initialPath = linkPath(srcNode.anim_initialX, srcNode.anim_initialY, tgtNode.x, tgtNode.y);
             linkElement.attr("d", initialPath);
-
-            // --- Animation ---
-            linkElement.transition(`linkEntrySynced_${srcNode.id}_${tgtNode.id}`) // New unique name
-              .delay(0)
-              .duration(DURATION_LINK_ENTRY) // 750ms
+            linkElement.transition(`linkEntrySynced_${srcNode.id}_${tgtNode.id}`)
+              .delay(0).duration(DURATION_LINK_ENTRY)
               .style("opacity", connectionsVisible ? 0.7 : 0)
               .attrTween("d", function () {
-                const interpolateSourceX = d3.interpolate(srcNode.anim_initialX, srcNode.x);
-                const interpolateSourceY = d3.interpolate(srcNode.anim_initialY, srcNode.y);
-
-                // Variables for target interpolation
-                let staticTargetX = tgtNode.x;
-                let staticTargetY = tgtNode.y;
-                let interpolateMovingTargetX = null;
-                let interpolateMovingTargetY = null;
-
+                const iSX = d3.interpolate(srcNode.anim_initialX, srcNode.x), iSY = d3.interpolate(srcNode.anim_initialY, srcNode.y);
+                let sTX = tgtNode.x, sTY = tgtNode.y, iMTX = null, iMTY = null;
                 if (tgtNode.isRepositioning && typeof tgtNode.oldX !== 'undefined' && typeof tgtNode.oldY !== 'undefined') {
-                  // Target is being repositioned, set up interpolators for it
-                  interpolateMovingTargetX = d3.interpolate(tgtNode.oldX, tgtNode.x);
-                  interpolateMovingTargetY = d3.interpolate(tgtNode.oldY, tgtNode.y);
+                  iMTX = d3.interpolate(tgtNode.oldX, tgtNode.x); iMTY = d3.interpolate(tgtNode.oldY, tgtNode.y);
                 }
-
-                return function (t_link) { // t_link is progress (0-1) for the link's 750ms animation
-                  const currentSourceX = interpolateSourceX(t_link);
-                  const currentSourceY = interpolateSourceY(t_link);
-
-                  let currentTargetX, currentTargetY;
-
-                  if (interpolateMovingTargetX) { // Target was/is moving
-                    const linkElapsedTime = t_link * DURATION_LINK_ENTRY;
-
-                    if (linkElapsedTime < DURATION_MOVED_NODE_REPOSITION) {
-                      // Target is still within its own 600ms animation
-                      const t_target = linkElapsedTime / DURATION_MOVED_NODE_REPOSITION; // Progress for target's animation
-                      currentTargetX = interpolateMovingTargetX(t_target);
-                      currentTargetY = interpolateMovingTargetY(t_target);
-                    } else {
-                      // Target has finished its 600ms move (but link might still be animating up to 750ms)
-                      // Snap to target's final position
-                      currentTargetX = staticTargetX;
-                      currentTargetY = staticTargetY;
-                    }
-                  } else {
-                    // Target is static
-                    currentTargetX = staticTargetX;
-                    currentTargetY = staticTargetY;
-                  }
-
-                  if (isNaN(currentSourceX) || isNaN(currentSourceY) || isNaN(currentTargetX) || isNaN(currentTargetY)) {
-                    console.warn(`WARN Link Tween (Synced): NaN for link ${srcNode.id}->${tgtNode.id} at t_link=${t_link}.`);
-                    return linkElement.attr("d");
-                  }
-                  return linkPath(currentSourceX, currentSourceY, currentTargetX, currentTargetY);
+                return function (t_link) {
+                  const cSX = iSX(t_link), cSY = iSY(t_link); let cTX, cTY;
+                  if (iMTX) {
+                    const linkET = t_link * DURATION_LINK_ENTRY;
+                    if (linkET < DURATION_MOVED_NODE_REPOSITION) {
+                      const t_target = linkET / DURATION_MOVED_NODE_REPOSITION;
+                      cTX = iMTX(t_target); cTY = iMTY(t_target);
+                    } else { cTX = sTX; cTY = sTY; }
+                  } else { cTX = sTX; cTY = sTY; }
+                  if (isNaN(cSX) || isNaN(cSY) || isNaN(cTX) || isNaN(cTY)) { return linkElement.attr("d"); }
+                  return linkPath(cSX, cSY, cTX, cTY);
                 };
               })
-              .on("interrupt", function () { // Ensure final state on interruption
-                d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
-              })
-              .on("end", function () { // Ensure final state on natural end
-                d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
-              });
-          });            
+              .on("interrupt", function () { d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0); })
+              .on("end", function () { d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0); });
+
+            // Removed timeout logic for link-flow-active
+          });
           updateNodeVisuals();
           return batch;
-        } // End of createBatch function
+        }
 
-        // ────────────────────────────────────────────────────────────────────────
-        // Backfill Logic: Mix new blocks and "backfill" older columns
-        // ────────────────────────────────────────────────────────────────────────
         if (!doGenBack) {
-          // Simple case: new blocks are placed in the current newest column (colX)
-          const Ys = computeEvenYs(count);
-          // Here, xVal passed to createBatch will be colX.
-          // Inside createBatch, dNode.columnX will be colX.
-          // So, isNodeEffectivelyBackfilled will be false.
-          createBatch(count, colX, Ys);
-
+          const Ys = computeEvenYs(count); createBatch(count, colX, Ys);
         } else {
-          // Complex case: some new blocks in the newest column (colX), others backfilled to older columns.
-          let actualNew = 1,
-            backfillCount = 0;
-          if (count > COUNT_BACK) {
-            actualNew = count - COUNT_BACK;
-            backfillCount = COUNT_BACK;
-          } else {
-            actualNew = 1;
-            backfillCount = count - 1;
-          }
-
-          if (actualNew > 0) {
-            const YsNew = computeEvenYs(actualNew);
-            // These 'actualNew' blocks are placed in colX.
-            // Inside createBatch, dNode.columnX will be colX.
-            // So, isNodeEffectivelyBackfilled will be false for these.
-            createBatch(actualNew, colX, YsNew);
-          }
-
+          let actualNew = 1, backfillCount = 0;
+          if (count > COUNT_BACK) { actualNew = count - COUNT_BACK; backfillCount = COUNT_BACK; }
+          else { actualNew = 1; backfillCount = count - 1; }
+          if (actualNew > 0) { const YsNew = computeEvenYs(actualNew); createBatch(actualNew, colX, YsNew); }
           if (backfillCount > 0) {
             const backfillCols = Math.ceil(randBetween(1, MAX_GENERATIONS_BACK + 1));
-            let backfillTargetX = colX - backfillCols * HORIZONTAL_SPACING; // Target X for backfilled nodes
+            let backfillTargetX = colX - backfillCols * HORIZONTAL_SPACING;
             backfillTargetX = Math.max(0, backfillTargetX);
-
             if (!columnMap.has(backfillTargetX)) columnMap.set(backfillTargetX, []);
             const existingInBackfill = columnMap.get(backfillTargetX).slice();
             const newTotal = existingInBackfill.length + backfillCount;
-
             const YsBackfill = computeEvenYs(newTotal);
             existingInBackfill.forEach((n, i) => {
-              n.oldX = n.x; // Store current X as oldX
-              n.oldY = n.y; // Store current Y as oldY
-              n.isRepositioning = true; // Flag that this node will animate
-
-              // Calculate new target positions (as before)
-              n.x = n.columnX + randomJitter(MAX_X_JITTER);
-              n.y = YsBackfill[i] + randomJitter(MAX_Y_JITTER);
+              n.oldX = n.x; n.oldY = n.y; n.isRepositioning = true;
+              n.x = n.columnX + randomJitter(MAX_X_JITTER); n.y = YsBackfill[i] + randomJitter(MAX_Y_JITTER);
             });
             const newYs = YsBackfill.slice(existingInBackfill.length);
-
-            // These 'backfillCount' blocks are placed in backfillTargetX.
             createBatch(backfillCount, backfillTargetX, newYs, existingInBackfill, true);
-
-            // Animate repositioned existing nodes in backfill column
             const movedIds = new Set(existingInBackfill.map(d => d.id));
-            nodeG.selectAll("g.node-group")
-              .filter(d => movedIds.has(d.id))
-              .transition("repositionExisting")
-              .duration(DURATION_MOVED_NODE_REPOSITION) // Use the constant (600ms)
-              .attr("transform", d => `translate(${d.x}, ${d.y})`)
-              .style("opacity", 1)
-              .on("end", function (d) { // IMPORTANT: Clear flags on animation end
-                d.isRepositioning = false;
-                delete d.oldX;
-                delete d.oldY;
-              });
-            // Animate repositioned links connected to moved nodes
-            linkG.selectAll("path.link")
-              .filter(dLink =>
-                (movedIds.has(dLink.source.id) && dLink.source.columnX === backfillTargetX) ||
-                (movedIds.has(dLink.target.id) && dLink.target.columnX === backfillTargetX)
-              )
-              .transition("repositionLinks")
-              .duration(600)
-              .attrTween("d", function (dLink) {
-                const prev = d3.select(this).attr("d");
-                const final = computeLinkPath(dLink);
-                return d3.interpolateString(prev, final);
-              });
+            nodeG.selectAll("g.node-group").filter(d => movedIds.has(d.id))
+              .transition("repositionExisting").duration(DURATION_MOVED_NODE_REPOSITION)
+              .attr("transform", d => `translate(${d.x}, ${d.y})`).style("opacity", 1)
+              .on("end", function (d) { d.isRepositioning = false; delete d.oldX; delete d.oldY; });
+            linkG.selectAll("path.link").filter(dL => (movedIds.has(dL.source.id) && dL.source.columnX === backfillTargetX) || (movedIds.has(dL.target.id) && dL.target.columnX === backfillTargetX))
+              .transition("repositionLinks").duration(600)
+              .attrTween("d", function (dL) { const p = d3.select(this).attr("d"), f = computeLinkPath(dL); return d3.interpolateString(p, f); });
           }
         }
+        if (newBlocksAddedThisCall > 0) recordNewBlocks(newBlocksAddedThisCall);
+      }
 
-        if (newBlocksAddedThisCall > 0) {
-          recordNewBlocks(newBlocksAddedThisCall);
-        }
-      } // End of addColumn function
-            
       /* ──────────────────────────────────────────────────────────────────────────
          6) Scheduler: Determines when to add the next column of blocks
       ────────────────────────────────────────────────────────────────────────── */
@@ -953,12 +973,9 @@
       function computeNextInterval(currentTime) {
         const avgColSizePercent = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
         const maxBlocksAtAvg = Math.max(1, Math.floor(TARGET_AVG_BPS * avgColSizePercent));
-        let avgBlocksPerBurst = (maxBlocksAtAvg + 1) / 2;
-        avgBlocksPerBurst = Math.max(1, avgBlocksPerBurst);
-        let targetBurstsPerSecond = TARGET_AVG_BPS / avgBlocksPerBurst;
-        targetBurstsPerSecond = Math.max(targetBurstsPerSecond, 0.01);
-        let avgInterval = 1000 / targetBurstsPerSecond;
-        avgInterval = clamp(avgInterval, MIN_INTERVAL_MS, MAX_INTERVAL_MS);
+        let avgBlocksPerBurst = (maxBlocksAtAvg + 1) / 2; avgBlocksPerBurst = Math.max(1, avgBlocksPerBurst);
+        let targetBurstsPerSecond = TARGET_AVG_BPS / avgBlocksPerBurst; targetBurstsPerSecond = Math.max(targetBurstsPerSecond, 0.01);
+        let avgInterval = 1000 / targetBurstsPerSecond; avgInterval = clamp(avgInterval, MIN_INTERVAL_MS, MAX_INTERVAL_MS);
         const fluctuation = avgInterval * BURST_FLUCT_PERCENT;
         let minInterval = Math.max(MIN_INTERVAL_MS, avgInterval - fluctuation);
         let maxInterval = Math.min(MAX_INTERVAL_MS, avgInterval + fluctuation);
@@ -968,31 +985,43 @@
 
       d3.timer(() => {
         const currentTime = performance.now();
-        if (!isPaused && currentTime >= nextBurstScheduler && TARGET_AVG_BPS > 0) {
+        if (!isPaused && TARGET_AVG_BPS > 0 && currentTime >= nextBurstScheduler) {
           const frac = randBetween(MIN_COLUMN_PERCENT, MAX_COLUMN_PERCENT);
           const maxThisRound = Math.max(1, Math.floor(TARGET_AVG_BPS * frac));
           const numBlocksInBurst = Math.floor(Math.random() * maxThisRound) + 1;
-          try {
-            addColumn(numBlocksInBurst);
-          } catch (e) {
-            console.error("Error during addColumn:", e);
-            d3.select(this).stop();
-            return;
-          }
+          try { addColumn(numBlocksInBurst); }
+          catch (e) { console.error("Error during addColumn:", e); d3.select(this).stop(); return; }
           nextBurstScheduler = computeNextInterval(currentTime);
-          if (isNaN(nextBurstScheduler)) {
-            console.error("Scheduler error: nextBurstScheduler is NaN. Stopping.");
-            d3.select(this).stop();
-            return;
-          }
-          const avgColPct = (MIN_COLUMN_PERCENT + MAX_COLUMN_PERCENT) / 2;
-          const maxAtAvg = Math.max(1, Math.floor(TARGET_AVG_BPS * avgColPct));
-          let avgForPause = (maxAtAvg + 1) / 2; avgForPause = Math.max(1, avgForPause);
-          let burstsPerSecPause = TARGET_AVG_BPS / avgForPause;
-          if (burstsPerSecPause < 0.5 && nodes.length > RECENT_POOL * 3) isPaused = true;
-          else if (isPaused) isPaused = false;
+          if (isNaN(nextBurstScheduler)) { console.error("Scheduler error: nextBurstScheduler is NaN. Stopping."); d3.select(this).stop(); return; }
         }
       });
+
+      /* ──────────────────────────────────────────────────────────────────────────
+         Ambient Effects - Shooting Stars
+      ────────────────────────────────────────────────────────────────────────── */
+      function addShootingStar() {
+        if (isPaused || currentZoom < 0.2 || Math.random() > 0.15) return;
+
+        const starSize = randBetween(1, 3) / Math.sqrt(currentZoom);
+        const duration = randBetween(1500, 4000);
+        const worldWidth = W / currentZoom;
+        const worldHeight = H / currentZoom;
+
+        const startX = scrollX + (Math.random() > 0.5 ? -1 : 1) * (worldWidth / 2 + 50);
+        const startY = halfH + randBetween(-worldHeight / 1.5, worldHeight / 1.5);
+
+        const endX = scrollX + (startX > scrollX ? -1 : 1) * randBetween(worldWidth * 0.8, worldWidth * 1.5);
+        const endY = halfH + randBetween(-worldHeight, worldHeight);
+
+        effectsG.append("circle")
+          .attr("class", "shooting-star")
+          .attr("cx", startX).attr("cy", startY).attr("r", starSize)
+          .style("opacity", 0.7)
+          .transition().duration(duration).ease(d3.easeQuadIn)
+          .attr("cx", endX).attr("cy", endY)
+          .style("opacity", 0).remove();
+      }
+      d3.timer(addShootingStar, 300);
 
       /* ──────────────────────────────────────────────────────────────────────────
          7) D3 Zoom Behavior
@@ -1048,12 +1077,13 @@
       const maxGenBackInput = document.getElementById("maxGenBackInput");
       const countBackInput = document.getElementById("countBackInput");
       const maxParentsInput = document.getElementById("maxParentsInput");
+      const pauseBtn = document.getElementById("pauseBtn");
       let showText = true;
       let connectionsVisible = true;
 
       targetInput.addEventListener("change", e => {
         const val = parseInt(e.target.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 1000) { TARGET_AVG_BPS = val; if (isPaused && TARGET_AVG_BPS > 0) isPaused = false; }
+        if (!isNaN(val) && val >= 1 && val <= 1000) { TARGET_AVG_BPS = val; }
         else { e.target.value = TARGET_AVG_BPS; }
       });
       maxGenBackInput.addEventListener("change", e => {
@@ -1079,7 +1109,20 @@
         connectionsVisible = e.target.checked;
         linkG.style("display", connectionsVisible ? null : "none");
         if (connectionsVisible) {
-          linkG.selectAll("path.link").style("opacity", 0.7);
+          linkG.selectAll("path.link").filter(function () { return !d3.select(this).classed("dimmed-link"); })
+            .style("opacity", 0.7);
+        }
+      });
+      pauseBtn.addEventListener("click", () => {
+        isPaused = !isPaused;
+        pauseBtn.textContent = isPaused ? "Resume" : "Pause";
+        pauseBtn.classList.toggle("paused", isPaused);
+        if (isPaused) {
+          stopTipPulsing();
+        } else {
+          startTipPulsing();
+          if (TARGET_AVG_BPS > 0 && nodes.length === 0) scheduleFirstColumn();
+          nextBurstScheduler = performance.now() + 100;
         }
       });
       resetBtn.addEventListener("click", resetVis);
@@ -1088,10 +1131,12 @@
         nodes = []; links = []; blockQueue = []; blocksInWindow = 0;
         columnMap.clear(); nodeCounter = 0; tipSet = new Set();
         scrollX = window.innerWidth / 2; currentZoom = 1.0;
-        updateDimensions(); nextX = W / 2; latestBaseX = W / 2; isPaused = false;
+        updateDimensions(); nextX = W / 2; latestBaseX = W / 2;
+
         nodeG.selectAll("g.node-group").remove();
         linkG.selectAll("path.link").remove();
         singleTooltip.style("opacity", 0);
+
         targetInput.value = TARGET_AVG_BPS = DEFAULT_TARGET_BPS;
         document.getElementById("realtimeBPSDisplay").textContent = "0.0";
         zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
@@ -1101,16 +1146,28 @@
         maxGenBackInput.value = MAX_GENERATIONS_BACK = 5;
         countBackInput.value = COUNT_BACK = 9;
         maxParentsInput.value = MAX_PARENTS_PER_BLOCK = 3;
+
+        clearSelection();
+        stopTipPulsing();
+        // Removed activeFlowTimeouts clearing
+        effectsG.selectAll("*").remove();
+
+        isPaused = false;
+        pauseBtn.textContent = "Pause";
+        pauseBtn.classList.remove("paused");
+
         const transform = `translate(${W / 2}, ${H / 2}) scale(${currentZoom}) translate(${-scrollX}, ${-halfH})`;
         g.attr("transform", transform); tooltipG.attr("transform", transform);
-        updateNodeVisuals();
+
         scheduleFirstColumn();
+        if (!isPaused) startTipPulsing();
       }
 
       /* ──────────────────────────────────────────────────────────────────────────
          11) Initial Setup & Start
       ────────────────────────────────────────────────────────────────────────── */
       function scheduleFirstColumn() {
+        if (nodes.length > 0) return;
         const initialCount = Math.max(1, Math.floor(TARGET_AVG_BPS * MIN_COLUMN_PERCENT));
         addColumn(initialCount);
         nextBurstScheduler = performance.now() + 1;
@@ -1119,10 +1176,9 @@
       zoomDisplay.textContent = `${currentZoom.toFixed(2)}x`;
       svg.classed("show-text", showText);
       scheduleFirstColumn();
-      updateNodeVisuals();
+      if (!isPaused) startTipPulsing();
     })();
   </script>
 </body>
 
 </html>
-```
