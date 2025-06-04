@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 
@@ -687,7 +686,7 @@
                 dNode.anim_initialX = dNode.x + dNode.anim_initialHorizontalOffset;
               }
 
-              dNode.anim_initialScale = 0.6 + Math.random() * 0.2; // Common scale animation
+              dNode.anim_initialScale = 1; // Node starts at full scale
 
               // Verify no NaN animation properties AFTER all anim_ values are set
               if (
@@ -702,7 +701,7 @@
                 dNode.anim_initialScale = 1;
               }
             })
-            .attr("transform", dNode => `translate(${dNode.anim_initialX}, ${dNode.anim_initialY}) scale(${dNode.anim_initialScale})`)
+            .attr("transform", dNode => `translate(${dNode.anim_initialX}, ${dNode.anim_initialY}) scale(${dNode.anim_initialScale})`) // This will now be scale(1)
             .style("opacity", 0); // Start invisible
 
           // Append block rectangle
@@ -740,73 +739,120 @@
           ────────────────────────────────────────────────────────────────────── */
           enterSel.transition("nodeEntry")
             .delay(dNode => randBetween(0, MAX_BURST_JITTER))
-            .duration(750)
-            .attr("transform", dNode => `translate(${dNode.x}, ${dNode.y}) scale(1)`)
+            .duration(DURATION_NODE_ENTRY) // Use the constant (750ms)
+            // MODIFICATION 3: Ensure final transform also uses scale(1) (it already does implicitly)
+            .attr("transform", dNode => `translate(${dNode.x}, ${dNode.y}) scale(1)`) // This implicitly means scale goes from anim_initialScale to 1
             .style("opacity", 1)
             .on("interrupt", function (dNode) {
               d3.select(this)
-                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`)
+                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`) // Ensure scale(1) on interrupt
                 .style("opacity", 1);
             })
             .on("end", function (dNode) {
               d3.select(this)
-                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`)
+                .attr("transform", `translate(${dNode.x}, ${dNode.y}) scale(1)`) // Ensure scale(1) on end
                 .style("opacity", 1);
             });
-
+            
           /* ──────────────────────────────────────────────────────────────────────
              Data join and animation for new links
           ────────────────────────────────────────────────────────────────────── */
           const newLinkData = links.filter(l => batch.some(nb => nb.id === l.source.id));
           const linkJoin = linkG.selectAll("path.link").data(links, d => `${d.source.id}-${d.target.id}`);
+
           const linkEnter = linkJoin.enter()
             .filter(d => newLinkData.some(nl => nl.source.id === d.source.id && nl.target.id === d.target.id))
             .append("path")
             .attr("class", "link")
-            .style("opacity", 0);
+            .style("opacity", 0); // Start invisible, will fade in
 
-          linkEnter
-            .attr("d", dLink => { // Set initial path using source's anim_initialX/Y
-              const src = dLink.source;
-              const tgt = dLink.target;
-              if (isNaN(src.anim_initialX) || isNaN(src.anim_initialY)) {
-                console.error(`ERROR Link Initial Path: NaN for source ${src.id}`);
-                return `M0,0L0,0`; // Fallback path
-              }
-              return linkPath(src.anim_initialX, src.anim_initialY, tgt.x, tgt.y);
-            })
-            .transition("linkEntry")
-            .delay(dLink => randBetween(0, MAX_BURST_JITTER))
-            .duration(750)
-            .style("opacity", connectionsVisible ? 0.7 : 0)
-            .attrTween("d", function (dLink) {
-              const src = dLink.source;
-              const tgt = dLink.target;
-              // Interpolate from the source's anim_initialX/Y to its final x/y
-              const interpolateSourceX = d3.interpolate(src.anim_initialX, src.x);
-              const interpolateSourceY = d3.interpolate(src.anim_initialY, src.y);
+          // For each entering link, define its animation
+          linkEnter.each(function (dLink) {
+            const linkElement = d3.select(this);
+            const srcNode = dLink.source; // The new block
+            const tgtNode = dLink.target; // The parent block
 
-              return function (t) {
-                const currentSourceX = interpolateSourceX(t);
-                const currentSourceY = interpolateSourceY(t);
-                if (isNaN(currentSourceX) || isNaN(currentSourceY)) {
-                  console.error(`ERROR Link Tween: NaN for source ${src.id} at t=${t}`);
-                  return d3.select(this).attr("d"); // Return current path if NaN
+            // Ensure all coordinates are valid before proceeding
+            if (
+              isNaN(srcNode.anim_initialX) || isNaN(srcNode.anim_initialY) ||
+              isNaN(srcNode.x) || isNaN(srcNode.y) ||
+              isNaN(tgtNode.x) || isNaN(tgtNode.y)
+            ) {
+              console.error(`ERROR Link Setup (Direct Connect): NaN in coordinates for link ${srcNode.id}->${tgtNode.id}.`);
+              linkElement.attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
+              return;
+            }
+
+            // Initial path: Source at its animation start, Target at its final fixed position.
+            const initialPath = linkPath(
+              srcNode.anim_initialX,
+              srcNode.anim_initialY,
+              tgtNode.x, // Target X is fixed
+              tgtNode.y  // Target Y is fixed
+            );
+            linkElement.attr("d", initialPath);
+
+            // --- Animation ---
+            linkElement.transition(`linkEntrySynced_${srcNode.id}_${tgtNode.id}`) // New unique name
+              .delay(0)
+              .duration(DURATION_LINK_ENTRY) // 750ms
+              .style("opacity", connectionsVisible ? 0.7 : 0)
+              .attrTween("d", function () {
+                const interpolateSourceX = d3.interpolate(srcNode.anim_initialX, srcNode.x);
+                const interpolateSourceY = d3.interpolate(srcNode.anim_initialY, srcNode.y);
+
+                // Variables for target interpolation
+                let staticTargetX = tgtNode.x;
+                let staticTargetY = tgtNode.y;
+                let interpolateMovingTargetX = null;
+                let interpolateMovingTargetY = null;
+
+                if (tgtNode.isRepositioning && typeof tgtNode.oldX !== 'undefined' && typeof tgtNode.oldY !== 'undefined') {
+                  // Target is being repositioned, set up interpolators for it
+                  interpolateMovingTargetX = d3.interpolate(tgtNode.oldX, tgtNode.x);
+                  interpolateMovingTargetY = d3.interpolate(tgtNode.oldY, tgtNode.y);
                 }
-                return linkPath(currentSourceX, currentSourceY, tgt.x, tgt.y);
-              };
-            })
-            .on("interrupt", function (dLink) {
-              d3.select(this)
-                .attr("d", computeLinkPath(dLink))
-                .style("opacity", connectionsVisible ? 0.7 : 0);
-            })
-            .on("end", function (dLink) {
-              d3.select(this)
-                .attr("d", computeLinkPath(dLink))
-                .style("opacity", connectionsVisible ? 0.7 : 0);
-            });
 
+                return function (t_link) { // t_link is progress (0-1) for the link's 750ms animation
+                  const currentSourceX = interpolateSourceX(t_link);
+                  const currentSourceY = interpolateSourceY(t_link);
+
+                  let currentTargetX, currentTargetY;
+
+                  if (interpolateMovingTargetX) { // Target was/is moving
+                    const linkElapsedTime = t_link * DURATION_LINK_ENTRY;
+
+                    if (linkElapsedTime < DURATION_MOVED_NODE_REPOSITION) {
+                      // Target is still within its own 600ms animation
+                      const t_target = linkElapsedTime / DURATION_MOVED_NODE_REPOSITION; // Progress for target's animation
+                      currentTargetX = interpolateMovingTargetX(t_target);
+                      currentTargetY = interpolateMovingTargetY(t_target);
+                    } else {
+                      // Target has finished its 600ms move (but link might still be animating up to 750ms)
+                      // Snap to target's final position
+                      currentTargetX = staticTargetX;
+                      currentTargetY = staticTargetY;
+                    }
+                  } else {
+                    // Target is static
+                    currentTargetX = staticTargetX;
+                    currentTargetY = staticTargetY;
+                  }
+
+                  if (isNaN(currentSourceX) || isNaN(currentSourceY) || isNaN(currentTargetX) || isNaN(currentTargetY)) {
+                    console.warn(`WARN Link Tween (Synced): NaN for link ${srcNode.id}->${tgtNode.id} at t_link=${t_link}.`);
+                    return linkElement.attr("d");
+                  }
+                  return linkPath(currentSourceX, currentSourceY, currentTargetX, currentTargetY);
+                };
+              })
+              .on("interrupt", function () { // Ensure final state on interruption
+                d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
+              })
+              .on("end", function () { // Ensure final state on natural end
+                d3.select(this).attr("d", computeLinkPath(dLink)).style("opacity", connectionsVisible ? 0.7 : 0);
+              });
+          });            
           updateNodeVisuals();
           return batch;
         } // End of createBatch function
@@ -853,16 +899,17 @@
 
             const YsBackfill = computeEvenYs(newTotal);
             existingInBackfill.forEach((n, i) => {
+              n.oldX = n.x; // Store current X as oldX
+              n.oldY = n.y; // Store current Y as oldY
+              n.isRepositioning = true; // Flag that this node will animate
+
+              // Calculate new target positions (as before)
               n.x = n.columnX + randomJitter(MAX_X_JITTER);
               n.y = YsBackfill[i] + randomJitter(MAX_Y_JITTER);
             });
             const newYs = YsBackfill.slice(existingInBackfill.length);
 
             // These 'backfillCount' blocks are placed in backfillTargetX.
-            // Here, xVal passed to createBatch is backfillTargetX.
-            // Inside createBatch, dNode.columnX will be backfillTargetX.
-            // Since backfillTargetX < colX, isNodeEffectivelyBackfilled will be true for these.
-            // The animation will start from backfillTargetX + HORIZONTAL_SPACING.
             createBatch(backfillCount, backfillTargetX, newYs, existingInBackfill, true);
 
             // Animate repositioned existing nodes in backfill column
@@ -870,10 +917,14 @@
             nodeG.selectAll("g.node-group")
               .filter(d => movedIds.has(d.id))
               .transition("repositionExisting")
-              .duration(600)
+              .duration(DURATION_MOVED_NODE_REPOSITION) // Use the constant (600ms)
               .attr("transform", d => `translate(${d.x}, ${d.y})`)
-              .style("opacity", 1);
-
+              .style("opacity", 1)
+              .on("end", function (d) { // IMPORTANT: Clear flags on animation end
+                d.isRepositioning = false;
+                delete d.oldX;
+                delete d.oldY;
+              });
             // Animate repositioned links connected to moved nodes
             linkG.selectAll("path.link")
               .filter(dLink =>
