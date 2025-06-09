@@ -350,7 +350,7 @@
     </div>
     <div>
       <label for="maxParentsInput">Max Parents:</label>
-      <input type="number" id="maxParentsInput" value="3" min="1" max="10" />
+      <input type="number" id="maxParentsInput" value="2" min="1" max="10" />
     </div>
     <button id="resetBtn">Reset</button>
     <button id="pauseBtn">Pause</button>
@@ -407,7 +407,7 @@
 
       let MAX_GENERATIONS_BACK = 5;
       let COUNT_BACK = 9;
-      let MAX_PARENTS_PER_BLOCK = 3;
+      let MAX_PARENTS_PER_BLOCK = 2;
 
       const BLOCK_W = 8, BLOCK_H = 8;
       const halfBlockW = BLOCK_W / 2, halfBlockH = BLOCK_H / 2;
@@ -1145,7 +1145,7 @@
         showConnectionsToggle.checked = true; connectionsVisible = true; linkG.style("display", null);
         maxGenBackInput.value = MAX_GENERATIONS_BACK = 5;
         countBackInput.value = COUNT_BACK = 9;
-        maxParentsInput.value = MAX_PARENTS_PER_BLOCK = 3;
+        maxParentsInput.value = MAX_PARENTS_PER_BLOCK = 2;
 
         clearSelection();
         stopTipPulsing();
