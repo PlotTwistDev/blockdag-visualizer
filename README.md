@@ -71,6 +71,16 @@ This project is *inspired* by Kaspa’s BlockDAG architecture but is strictly a 
 Kaspa is a high-performance, proof-of-work blockchain built on a BlockDAG consensus model.  
 Learn more: [https://kaspa.org](https://kaspa.org)
 
+## Donation
+
+If you find this project useful and would like to support continued development, consider donating Kaspa 🟢
+
+**Kaspa Address:**  
+`kaspa:qpvexnc0mj8tty8papgwgcy9n5n3wnqxgd3jslhggfzh4xjtxv2rvrfarzd5v`
+
+Click the "💰 Donate KASPA" button in the app to copy this address to your clipboard instantly.
+
+
 ## License
 
 This project is licensed under the MIT License.  
