@@ -296,6 +296,21 @@
       border-color: #FFA060;
     }
 
+    /* (Optional) Styling tweak */
+    #donateBtn {
+      background-color: #28a745;
+      border: 1px solid #1f7a33;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #donateBtn:hover {
+      background-color: #3fc060;
+    }
+
     /* Responsive HUD tweaks for small screens */
     @media (max-width: 480px) {
       #hud {
@@ -354,6 +369,9 @@
     </div>
     <button id="resetBtn">Reset</button>
     <button id="pauseBtn">Pause</button>
+
+    <!-- Add the button to your HUD -->
+    <button id="donateBtn">💰 Donate KASPA</button>
   </div>
 
   <!-- SVG container for D3-rendered BlockDAG -->
@@ -1177,6 +1195,24 @@
       svg.classed("show-text", showText);
       scheduleFirstColumn();
       if (!isPaused) startTipPulsing();
+
+      // ——— Donation Copy Button ———
+      const donateBtn = document.getElementById('donateBtn');
+      const kaspaAddress = 'kaspa:qpvexnc0mj8tty8papgwgcy9n5n3wnqxgd3jslhggfzh4xjtxv2rvrfarzd5v';
+
+      donateBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(kaspaAddress)
+          .then(() => {
+            // feedback to the user
+            donateBtn.textContent = 'Copied! ✔️';
+            setTimeout(() => donateBtn.textContent = '💰 Donate KASPA', 2000);
+          })
+          .catch(err => {
+            console.error('Failed to copy:', err);
+            donateBtn.textContent = 'Error 😕';
+          });
+      });
+
     })();
   </script>
 </body>
