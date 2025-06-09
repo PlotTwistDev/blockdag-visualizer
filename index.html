@@ -371,7 +371,7 @@
     <button id="pauseBtn">Pause</button>
 
     <!-- Add the button to your HUD -->
-    <button id="donateBtn">💰 Donate KASPA</button>
+    <button id="donateBtn"><img src="assets/kaspa-icon-16x16.png" alt="Kaspa" style="height:16px; vertical-align:middle; margin-right:6px;"> Donate KASPA</button>
   </div>
 
   <!-- SVG container for D3-rendered BlockDAG -->
@@ -1205,7 +1205,9 @@
           .then(() => {
             // feedback to the user
             donateBtn.textContent = 'Copied! ✔️';
-            setTimeout(() => donateBtn.textContent = '💰 Donate KASPA', 2000);
+            setTimeout(() => {
+              donateBtn.innerHTML = '<img src="assets/kaspa-icon-16x16.png" alt="Kaspa" style="height:16px; vertical-align:middle; margin-right:6px;">Donate KASPA';
+            }, 2000);
           })
           .catch(err => {
             console.error('Failed to copy:', err);
