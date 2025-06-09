@@ -78,7 +78,8 @@ If you find this project useful and would like to support continued development,
 **Kaspa Address:**  
 `kaspa:qpvexnc0mj8tty8papgwgcy9n5n3wnqxgd3jslhggfzh4xjtxv2rvrfarzd5v`
 
-Click the "💰 Donate KASPA" button in the app to copy this address to your clipboard instantly.
+Click the <img src="assets/kaspa-icon-32x32.png" alt="Kaspa" height="20" style="vertical-align:middle;"> **Donate KASPA** button in the app to copy this address to your clipboard instantly.
+
 
 
 ## License
